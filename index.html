@@ -1,0 +1,132 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brain Heist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Roboto:wght@400;500;700&display=swap');
+      
+      :root {
+        --bg: #071020;
+        --panel: #0d1420;
+        --neon-pink: #FF2D91;
+        --neon-cyan: #00D0E8;
+        --neon-lime: #A6FF4D;
+        --neon-purple: #a855f7;
+        --glass: rgba(255, 255, 255, 0.03);
+        --glass-border: rgba(255, 255, 255, 0.08);
+      }
+
+      body {
+        background-color: var(--bg);
+        font-family: 'Roboto', sans-serif;
+        color: #e0e0e0;
+      }
+
+      .font-orbitron {
+        font-family: 'Orbitron', sans-serif;
+      }
+
+      .neon-glow-cyan {
+        text-shadow: 0 0 5px var(--neon-cyan), 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+      }
+      .neon-glow-pink {
+        text-shadow: 0 0 5px var(--neon-pink), 0 0 10px var(--neon-pink), 0 0 20px var(--neon-pink);
+      }
+      .neon-glow-lime {
+        text-shadow: 0 0 5px var(--neon-lime), 0 0 10px var(--neon-lime), 0 0 20px var(--neon-lime);
+      }
+      .neon-glow-purple {
+        text-shadow: 0 0 5px var(--neon-purple), 0 0 10px var(--neon-purple), 0 0 20px var(--neon-purple);
+      }
+
+      .neon-border {
+        position: relative;
+        border: 1px solid var(--glass-border);
+        background: var(--glass);
+        backdrop-filter: blur(10px);
+      }
+      .neon-border::before, .neon-border::after {
+        content: "";
+        position: absolute;
+        border-radius: inherit;
+        z-index: -1;
+        inset: -2px;
+        pointer-events: none;
+      }
+      .neon-border.accent-cyan::before {
+        background: radial-gradient(400px at 50% 50%, var(--neon-cyan), transparent 60%);
+        opacity: 0.2;
+        filter: blur(40px);
+      }
+      .neon-border.accent-pink::before {
+        background: radial-gradient(400px at 50% 50%, var(--neon-pink), transparent 60%);
+        opacity: 0.2;
+        filter: blur(40px);
+      }
+       .neon-border.accent-lime::before {
+        background: radial-gradient(400px at 50% 50%, var(--neon-lime), transparent 60%);
+        opacity: 0.2;
+        filter: blur(40px);
+      }
+       .neon-border.accent-purple::before {
+        background: radial-gradient(400px at 50% 50%, var(--neon-purple), transparent 60%);
+        opacity: 0.2;
+        filter: blur(40px);
+      }
+      
+      .btn-neon {
+        position: relative;
+        overflow: hidden;
+        z-index: 1;
+        transition: all 0.3s ease;
+      }
+      .btn-neon::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 0%;
+        height: 200%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+        transition: width 0.4s ease;
+        z-index: -1;
+      }
+      .btn-neon:hover::before {
+        width: 150%;
+      }
+      
+      .hacker-bg {
+        background-image:
+          linear-gradient(rgba(7, 16, 32, 0.95), rgba(7, 16, 32, 0.95)),
+          url('https://picsum.photos/1920/1080?grayscale&blur=5');
+        background-size: cover;
+        background-position: center;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: -10;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
