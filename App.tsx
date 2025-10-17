@@ -583,7 +583,9 @@ const App: React.FC = () => {
     if (!currentUser) return;
     const result = await GameService.activateItem(currentUser, inventoryId);
     if (result.success) {
-        const isPermBoost = result.updatedUser?.id === currentUser.id;
+        // A null updatedUser means the user object didn't need a refresh (non-perm boost)
+        const updatedUser = result.updatedUser || currentUser;
+        const isPermBoost = result.updatedUser && result.updatedUser.id === currentUser.id;
         
         setActivationAnimation({
             itemId: inventoryId,
@@ -592,7 +594,7 @@ const App: React.FC = () => {
         setTimeout(() => setActivationAnimation(null), 1000);
 
         if (isPermBoost) {
-           setCurrentUser(result.updatedUser);
+           setCurrentUser(updatedUser);
            GameService.playSound('perm_boost');
         } else {
             GameService.playSound('item_activate');
@@ -606,8 +608,12 @@ const App: React.FC = () => {
 
   const handleReactToFeed = async (feedItemId: string, emoji: ReactionEmoji) => {
     GameService.playSound('ui_click');
-    await GameService.reactToFeedItem(feedItemId, emoji);
-    GameService.getFeed().then(setFeed);
+    const result = await GameService.reactToFeedItem(feedItemId, emoji);
+    if (result.success) {
+        GameService.getFeed().then(setFeed);
+    } else {
+        console.error("Failed to react to feed item");
+    }
   };
   
   const handlePlayerClick = (player: Profile) => {
@@ -731,38 +737,76 @@ const App: React.FC = () => {
   const handleAdminAction = async (action: 'addCreds' | 'addXp' | 'giveItem' | 'addBadge' | 'deletePlayer') => {
     if (!selectedPlayer) return;
     GameService.playSound('admin_action');
-    switch (action) {
-        case 'addCreds':
-            await GameService.addCreds(selectedPlayer, adminAmount);
-            alert(`Added ${adminAmount} creds`);
-            break;
-        case 'addXp':
-            await GameService.addXp(selectedPlayer, adminAmount);
-            alert(`Added ${adminAmount} XP`);
-            break;
-        case 'giveItem':
-            if (adminItemId) await GameService.giveItem(selectedPlayer, adminItemId);
-            break;
-        case 'addBadge':
-            if (adminBadge) await GameService.addBadge(selectedPlayer, adminBadge);
-            break;
-        case 'deletePlayer':
-             if (window.confirm('Are you sure you want to delete this player? This cannot be undone.')) {
-                await GameService.deletePlayer(selectedPlayer);
-                alert('Player deleted.');
-                setSelectedPlayer(null);
-            }
-            break;
+    let success = false;
+    let alertMessage = '';
+
+    try {
+        switch (action) {
+            case 'addCreds':
+                const credsResult = await GameService.addCreds(selectedPlayer, adminAmount);
+                success = credsResult.success;
+                if(success) alertMessage = `Added ${adminAmount} creds`;
+                break;
+            case 'addXp':
+                const xpResult = await GameService.addXp(selectedPlayer, adminAmount);
+                success = xpResult.success;
+                if(success) alertMessage = `Added ${adminAmount} XP`;
+                break;
+            case 'giveItem':
+                if (adminItemId) {
+                    const itemResult = await GameService.giveItem(selectedPlayer, adminItemId);
+                    success = itemResult.success;
+                    if(success) alertMessage = 'Item given';
+                }
+                break;
+            case 'addBadge':
+                if (adminBadge) {
+                    const badgeResult = await GameService.addBadge(selectedPlayer, adminBadge);
+                    success = badgeResult.success;
+                    if(success) alertMessage = 'Badge added';
+                }
+                break;
+            case 'deletePlayer':
+                 if (window.confirm('Are you sure you want to delete this player? This cannot be undone.')) {
+                    const deleteResult = await GameService.deletePlayer(selectedPlayer);
+                    success = deleteResult.success;
+                    if (success) {
+                        alertMessage = 'Player deleted.';
+                        setSelectedPlayer(null);
+                    }
+                }
+                break;
+        }
+
+        if (alertMessage) {
+            alert(alertMessage);
+        } else if (action !== 'deletePlayer') {
+             alert('Admin action failed.');
+             GameService.playSound('hack_fail');
+        }
+        
+        if (success) {
+            GameService.getPlayers(currentUser?.id).then(setPlayers);
+        }
+
+    } catch (error) {
+        console.error("Admin action failed:", error);
+        alert("An error occurred during the admin action.");
+        GameService.playSound('hack_fail');
     }
-    GameService.getPlayers(currentUser?.id).then(setPlayers);
   };
 
   const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    await GameService.saveQuestion(editingQuestion);
-    setEditingQuestion(getInitialEditingQuestion());
-    GameService.getAllQuestions().then(setAllQuestions);
-    GameService.playSound('admin_action');
+    const result = await GameService.saveQuestion(editingQuestion);
+    if (result) {
+        setEditingQuestion(getInitialEditingQuestion());
+        GameService.getAllQuestions().then(setAllQuestions);
+        GameService.playSound('admin_action');
+    } else {
+        alert("Failed to save question.");
+        GameService.playSound('hack_fail');
+    }
   };
 
   const handleEditQuestion = (question: Question) => {
@@ -776,9 +820,14 @@ const App: React.FC = () => {
 
   const handleDeleteQuestion = async (questionId: string) => {
     if (window.confirm('Are you sure you want to delete this question?')) {
-        await GameService.deleteQuestion(questionId);
-        GameService.getAllQuestions().then(setAllQuestions);
-        GameService.playSound('hack_fail');
+        const result = await GameService.deleteQuestion(questionId);
+        if (result.success) {
+            GameService.getAllQuestions().then(setAllQuestions);
+            GameService.playSound('admin_action');
+        } else {
+            alert('Failed to delete question.');
+            GameService.playSound('hack_fail');
+        }
     }
   };
   

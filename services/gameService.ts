@@ -89,10 +89,15 @@ export const login = async (username: string, password?: string): Promise<Profil
 };
 
 export const updateBio = async (userId: string, newBio: string): Promise<Profile | null> => {
-    const userRef = doc(db, 'players', userId);
-    await updateDoc(userRef, { bio: newBio });
-    const updatedUser = await getPlayerById(userId);
-    return updatedUser;
+    try {
+        const userRef = doc(db, 'players', userId);
+        await updateDoc(userRef, { bio: newBio });
+        const updatedUser = await getPlayerById(userId);
+        return updatedUser;
+    } catch (e) {
+        console.error("Update bio failed:", e);
+        return null;
+    }
 }
 
 export const getPlayerById = async (userId: string): Promise<Profile | null> => {
@@ -173,23 +178,29 @@ export const getFeed = async (): Promise<FeedItem[]> => {
     return feed;
 };
 
-export const reactToFeedItem = async (feedItemId: string, emoji: ReactionEmoji): Promise<FeedItem | null> => {
+export const reactToFeedItem = async (feedItemId: string, emoji: ReactionEmoji): Promise<{ success: boolean; updatedItem: FeedItem | null }> => {
     const itemRef = doc(db, 'feedItems', feedItemId);
-    await runTransaction(db, async (transaction) => {
-        const itemDoc = await transaction.get(itemRef);
-        if (!itemDoc.exists()) {
-            throw "Document does not exist!";
-        }
-        const item = fromSnap<FeedItem>(itemDoc);
-        const reaction = item.reactions.find(r => r.emoji === emoji);
-        if (reaction) {
-            reaction.count++;
-        }
-        transaction.update(itemRef, { reactions: item.reactions });
-    });
-    const updatedItemSnap = await getDoc(itemRef);
-    return fromSnap<FeedItem>(updatedItemSnap);
+    try {
+        await runTransaction(db, async (transaction) => {
+            const itemDoc = await transaction.get(itemRef);
+            if (!itemDoc.exists()) {
+                throw new Error("Document does not exist!");
+            }
+            const item = fromSnap<FeedItem>(itemDoc);
+            const reaction = item.reactions.find(r => r.emoji === emoji);
+            if (reaction) {
+                reaction.count++;
+            }
+            transaction.update(itemRef, { reactions: item.reactions });
+        });
+        const updatedItemSnap = await getDoc(itemRef);
+        return { success: true, updatedItem: fromSnap<FeedItem>(updatedItemSnap) };
+    } catch (e) {
+        console.error("React to feed item failed:", e);
+        return { success: false, updatedItem: null };
+    }
 };
+
 
 // --- Hacking Service Functions ---
 export const emulateHack = async (attacker: Profile, defender: Profile): Promise<HackEmulationResult> => {
@@ -227,7 +238,7 @@ export const performHack = async (attacker: Profile, defender: Profile): Promise
         const defenderDoc = await transaction.get(defenderRef);
 
         if (!attackerDoc.exists() || !defenderDoc.exists()) {
-            throw "Attacker or Defender not found!";
+            throw new Error("Attacker or Defender not found!");
         }
         
         const mutableAttacker = fromSnap<Profile>(attackerDoc);
@@ -271,87 +282,88 @@ export const performHack = async (attacker: Profile, defender: Profile): Promise
 
 // --- Shop & Inventory Service ---
 export const buyItem = async (user: Profile, item: ShopItem): Promise<{success: boolean, message: string, updatedUser: Profile | null}> => {
-  try {
-    await runTransaction(db, async (transaction) => {
-        const userRef = doc(db, 'players', user.id);
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists() || userDoc.data().creds < item.price_creds) {
-            throw "Not enough creds!";
-        }
-        
-        transaction.update(userRef, { creds: userDoc.data().creds - item.price_creds });
+    try {
+        await runTransaction(db, async (transaction) => {
+            const userRef = doc(db, 'players', user.id);
+            const userDoc = await transaction.get(userRef);
 
-        if (item.payload.effect === 'stamina_refill') {
-             const currentStamina = userDoc.data().stamina;
-             const maxStamina = userDoc.data().stamina_max;
-             transaction.update(userRef, { stamina: Math.min(maxStamina, currentStamina + item.payload.value) });
-        } else {
+            if (!userDoc.exists() || userDoc.data().creds < item.price_creds) {
+                throw new Error("Not enough creds!");
+            }
+
+            // All reads must come before writes.
             const inventoryRef = collection(db, 'inventory');
             const q = query(inventoryRef, where('user_id', '==', user.id), where('item_id', '==', item.id));
-            const snapshot = await getDocs(q); // Note: getDocs inside transaction is not recommended, but query is complex.
+            const invSnapshot = await getDocs(q); 
             
-            if (!snapshot.empty) {
-                const existingItemDoc = snapshot.docs[0];
-                transaction.update(existingItemDoc.ref, { qty: existingItemDoc.data().qty + 1 });
-            } else {
-                 // Firestore transactions require all reads before writes.
-                 // This pattern is tricky. A better way would be a subcollection on the user.
-                 // For now, we add a new doc outside the transaction after it succeeds, which is not ideal.
-                 // The addDoc will be done after the transaction for simplicity here.
-            }
-        }
-    });
-    
-    // Handle adding new item if it's not a consumable
-    if (item.payload.effect !== 'stamina_refill') {
-        const inventoryRef = collection(db, 'inventory');
-        const q = query(inventoryRef, where('user_id', '==', user.id), where('item_id', '==', item.id));
-        const snapshot = await getDocs(q);
-        if (snapshot.empty) {
-            await addDoc(inventoryRef, {
-                user_id: user.id,
-                item_id: item.id,
-                qty: 1,
-                activated: false
-            });
-        }
-    }
+            // --- ALL READS ARE COMPLETE ---
+            // --- WRITES START HERE ---
 
-    const updatedUser = await getPlayerById(user.id);
-    return { success: true, message: `Purchased ${item.title}!`, updatedUser };
-  } catch (e: any) {
-    return { success: false, message: e.toString(), updatedUser: null };
-  }
+            const newCreds = userDoc.data().creds - item.price_creds;
+            
+            if (item.item_type === 'consumable' && item.payload.effect === 'stamina_refill') {
+                 const currentStamina = userDoc.data().stamina;
+                 const maxStamina = userDoc.data().stamina_max;
+                 const newStamina = Math.min(maxStamina, currentStamina + item.payload.value);
+                 transaction.update(userRef, { creds: newCreds, stamina: newStamina });
+            } else {
+                transaction.update(userRef, { creds: newCreds });
+
+                if (!invSnapshot.empty) {
+                    const existingItemDoc = invSnapshot.docs[0];
+                    transaction.update(existingItemDoc.ref, { qty: existingItemDoc.data().qty + 1 });
+                } else {
+                    const newInvItemRef = doc(inventoryRef);
+                    transaction.set(newInvItemRef, {
+                        user_id: user.id,
+                        item_id: item.id,
+                        qty: 1,
+                        activated: false
+                    });
+                }
+            }
+        });
+
+        const updatedUser = await getPlayerById(user.id);
+        return { success: true, message: `Purchased ${item.title}!`, updatedUser };
+    } catch (e: any) {
+        console.error("Buy item transaction failed:", e);
+        return { success: false, message: e.message || "Purchase failed.", updatedUser: null };
+    }
 }
 
 export const activateItem = async (user: Profile, inventoryId: string): Promise<{success: boolean, message: string, updatedUser: Profile | null}> => {
-    const itemRef = doc(db, 'inventory', inventoryId);
-    const itemSnap = await getDoc(itemRef);
+    try {
+        const invItemRef = doc(db, 'inventory', inventoryId);
+        const invItemSnap = await getDoc(invItemRef);
+        
+        if (!invItemSnap.exists() || invItemSnap.data().user_id !== user.id) {
+            return { success: false, message: "Item not found!", updatedUser: user };
+        }
+        
+        const item = fromSnap<InventoryItem>(invItemSnap);
+        if(item.activated) {
+            return { success: false, message: "Item already active!", updatedUser: user };
+        }
 
-    if (!itemSnap.exists() || itemSnap.data().user_id !== user.id) {
-        return { success: false, message: "Item not found!", updatedUser: user };
-    }
-    
-    const item = fromSnap<InventoryItem>(itemSnap);
-    if(item.activated) return { success: false, message: "Item already active!", updatedUser: user };
-
-    const itemDetails = (await getDoc(doc(db, 'shopItems', item.item_id))).data() as ShopItem;
-    item.itemDetails = itemDetails;
-
-    // Handle permanent boosts
-    if (item.itemDetails.item_type === 'permanent_boost') {
-        try {
+        const itemDetailsSnap = await getDoc(doc(db, 'shopItems', item.item_id));
+        if (!itemDetailsSnap.exists()) {
+             return { success: false, message: "Item details not found in shop.", updatedUser: user };
+        }
+        const itemDetails = fromSnap<ShopItem>(itemDetailsSnap);
+        
+        // Handle permanent boosts
+        if (itemDetails.item_type === 'permanent_boost') {
             await runTransaction(db, async (transaction) => {
                 const playerRef = doc(db, 'players', user.id);
-                const invItemRef = doc(db, 'inventory', inventoryId);
                 const playerDoc = await transaction.get(playerRef);
-                if (!playerDoc.exists()) throw "Player not found";
+                if (!playerDoc.exists()) throw new Error("Player not found");
 
                 let updateData = {};
-                if (item.itemDetails.payload.effect === 'perm_hack_skill') {
-                    updateData = { hacking_skill: playerDoc.data().hacking_skill + item.itemDetails.payload.value };
-                } else if (item.itemDetails.payload.effect === 'perm_security_level') {
-                    updateData = { security_level: playerDoc.data().security_level + item.itemDetails.payload.value };
+                if (itemDetails.payload.effect === 'perm_hack_skill') {
+                    updateData = { hacking_skill: playerDoc.data().hacking_skill + itemDetails.payload.value };
+                } else if (itemDetails.payload.effect === 'perm_security_level') {
+                    updateData = { security_level: playerDoc.data().security_level + itemDetails.payload.value };
                 }
                 transaction.update(playerRef, updateData);
 
@@ -362,33 +374,35 @@ export const activateItem = async (user: Profile, inventoryId: string): Promise<
                     transaction.delete(invItemRef);
                 }
             });
-             await addFeedItem(`<strong>${user.display_name}</strong> permanently upgraded their mainframe with a <strong>${item.itemDetails.title}</strong>!`, 'permanent_upgrade');
-             const updatedUser = await getPlayerById(user.id);
-             return { success: true, message: `Used ${item.itemDetails.title} for a permanent boost!`, updatedUser };
-        } catch (e) {
-            console.error("Permanent boost failed:", e);
-            return { success: false, message: "Failed to apply boost.", updatedUser: user };
+            await addFeedItem(`<strong>${user.display_name}</strong> permanently upgraded their mainframe with a <strong>${itemDetails.title}</strong>!`, 'permanent_upgrade');
+            const updatedUser = await getPlayerById(user.id);
+            return { success: true, message: `Used ${itemDetails.title} for a permanent boost!`, updatedUser };
         }
-    }
 
-
-    if (item.itemDetails?.item_type === 'consumable') {
-        if(item.qty > 1) {
-            await updateDoc(itemRef, { qty: item.qty - 1 });
+        // Handle other item types
+        if (itemDetails.item_type === 'consumable') {
+            if (item.qty > 1) {
+                await updateDoc(invItemRef, { qty: item.qty - 1 });
+            } else {
+                await deleteDoc(invItemRef);
+            }
         } else {
-            await deleteDoc(itemRef);
+            await updateDoc(invItemRef, { activated: true });
         }
-    } else {
-        await updateDoc(itemRef, { activated: true });
+        
+        const message = itemDetails.item_type === 'consumable' ? `${itemDetails.title} consumed!` : `${itemDetails.title} activated!`;
+        
+        if (itemDetails.tier > 1) {
+            await addFeedItem(`<strong>${user.display_name}</strong> just activated a <strong>${itemDetails.title}</strong>!`, 'item_activation');
+        }
+        
+        // Return original user object since their profile data didn't change for non-perm items.
+        return { success: true, message, updatedUser: user };
+
+    } catch (e: any) {
+        console.error("Activate item failed:", e);
+        return { success: false, message: e.message || "Failed to activate item.", updatedUser: null };
     }
-    
-    const message = item.itemDetails?.item_type === 'consumable' ? `${item.itemDetails.title} consumed!` : `${item.itemDetails.title} activated!`;
-    
-    if (item.itemDetails && item.itemDetails.tier > 1) {
-        await addFeedItem(`<strong>${user.display_name}</strong> just activated a <strong>${item.itemDetails.title}</strong>!`, 'item_activation');
-    }
-    
-    return { success: true, message, updatedUser: user };
 };
 
 // --- Task Service Functions ---
@@ -418,18 +432,25 @@ export const getTasks = async (userId: string): Promise<UserTask[]> => {
 };
 
 export const acceptTask = async (userTaskId: string): Promise<{success: boolean, updatedTask: UserTask | null}> => {
-    const taskRef = doc(db, 'userTasks', userTaskId);
-    await updateDoc(taskRef, { status: 'in_progress' });
-    const taskSnap = await getDoc(taskRef);
-    const updatedTask = fromSnap<UserTask>(taskSnap);
-
-    // Re-fetch template to return the full object
-    const templateSnap = await getDoc(doc(db, 'taskTemplates', updatedTask.task_template_id));
-    if (templateSnap.exists()) {
-        updatedTask.template = fromSnap<TaskTemplate>(templateSnap);
+    try {
+        const taskRef = doc(db, 'userTasks', userTaskId);
+        await updateDoc(taskRef, { status: 'in_progress' });
+        const taskSnap = await getDoc(taskRef);
+        if (!taskSnap.exists()) {
+             throw new Error("Task not found after update.");
+        }
+        const updatedTask = fromSnap<UserTask>(taskSnap);
+    
+        const templateSnap = await getDoc(doc(db, 'taskTemplates', updatedTask.task_template_id));
+        if (templateSnap.exists()) {
+            updatedTask.template = fromSnap<TaskTemplate>(templateSnap);
+        }
+    
+        return { success: true, updatedTask };
+    } catch (e) {
+        console.error("Accept task failed:", e);
+        return { success: false, updatedTask: null };
     }
-
-    return { success: true, updatedTask };
 };
 
 export const claimTaskReward = async (userTaskId: string, userId: string): Promise<{success: boolean, updatedTask: UserTask | null, reward: {creds: number, xp: number} | null}> => {
@@ -443,13 +464,13 @@ export const claimTaskReward = async (userTaskId: string, userId: string): Promi
             const userDoc = await transaction.get(userRef);
 
             if (!taskDoc.exists() || !userDoc.exists() || taskDoc.data().status !== 'completed') {
-                throw "Task not ready to be claimed.";
+                throw new Error("Task not ready to be claimed.");
             }
             
             const templateRef = doc(db, 'taskTemplates', taskDoc.data().task_template_id);
             const templateDoc = await transaction.get(templateRef);
             if (!templateDoc.exists()) {
-                throw "Task template not found.";
+                throw new Error("Task template not found.");
             }
             const template = templateDoc.data();
             
@@ -496,21 +517,26 @@ export const getQuestions = async (subject: string): Promise<Question[]> => {
 };
 
 export const submitAnswer = async (question: Question, answer: string, userId: string): Promise<{correct: boolean, reward: {creds: number, xp: number}}> => {
-    const userRef = doc(db, 'players', userId);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
+    try {
+        const userRef = doc(db, 'players', userId);
+        const userSnap = await getDoc(userRef);
+    
+        if (!userSnap.exists()) {
+            return { correct: false, reward: { creds: 0, xp: 0 } };
+        }
+        const correct = question.correct_answer === answer;
+        const reward = correct ? { creds: 20, xp: 10 } : { creds: -5, xp: 0 };
+        
+        await updateDoc(userRef, {
+            creds: userSnap.data().creds + reward.creds,
+            xp: userSnap.data().xp + reward.xp
+        });
+      
+        return { correct, reward };
+    } catch (e) {
+        console.error("Submit answer failed:", e);
         return { correct: false, reward: { creds: 0, xp: 0 } };
     }
-    const correct = question.correct_answer === answer;
-    const reward = correct ? { creds: 20, xp: 10 } : { creds: -5, xp: 0 };
-    
-    await updateDoc(userRef, {
-        creds: userSnap.data().creds + reward.creds,
-        xp: userSnap.data().xp + reward.xp
-    });
-  
-    return { correct, reward };
 };
 
 export const getAllQuestions = async(): Promise<Question[]> => {
@@ -521,57 +547,72 @@ export const getAllQuestions = async(): Promise<Question[]> => {
     return questions;
 }
 
-export const saveQuestion = async(questionData: Omit<Question, 'id' | 'correct_answer'> & {id?: string, correct_choice_index: number}): Promise<Question> => {
-    const { id, correct_choice_index, ...data } = questionData;
-    const dataToSave: Omit<Question, 'id'> = {
-        ...data,
-        correct_answer: data.choices[correct_choice_index],
-    };
+export const saveQuestion = async(questionData: Omit<Question, 'id' | 'correct_answer'> & {id?: string, correct_choice_index: number}): Promise<Question | null> => {
+    try {
+        const { id, correct_choice_index, ...data } = questionData;
+        const dataToSave: Omit<Question, 'id'> = {
+            ...data,
+            correct_answer: data.choices[correct_choice_index],
+        };
 
-    if (id) {
-        const qRef = doc(db, 'questions', id);
-        await updateDoc(qRef, dataToSave);
-        const snap = await getDoc(qRef);
+        if (id) {
+            const qRef = doc(db, 'questions', id);
+            await updateDoc(qRef, dataToSave);
+            const snap = await getDoc(qRef);
+            return fromSnap<Question>(snap);
+        }
+        const docRef = await addDoc(collection(db, 'questions'), dataToSave);
+        const snap = await getDoc(docRef);
         return fromSnap<Question>(snap);
+    } catch(e) {
+        console.error("Save question failed:", e);
+        return null;
     }
-    const docRef = await addDoc(collection(db, 'questions'), dataToSave);
-    const snap = await getDoc(docRef);
-    return fromSnap<Question>(snap);
 }
 
 export const deleteQuestion = async(questionId: string): Promise<{success: boolean}> => {
-    const qRef = doc(db, 'questions', questionId);
-    await deleteDoc(qRef);
-    return { success: true };
+    try {
+        const qRef = doc(db, 'questions', questionId);
+        await deleteDoc(qRef);
+        return { success: true };
+    } catch(e) {
+        console.error("Delete question failed:", e);
+        return { success: false };
+    }
 }
 
 export const uploadQuestionsFromCSV = async (csvContent: string): Promise<{success: boolean, count: number}> => {
-    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
-    const batch = writeBatch(db);
-    const questionsRef = collection(db, 'questions');
-    let count = 0;
-
-    lines.forEach(line => {
-        const [prompt, correct_answer, choice2, choice3, choice4, subject] = line.split(',').map(s => s.trim());
-        if (prompt && correct_answer && choice2 && choice3 && choice4 && subject) {
-            const newQuestion: Omit<Question, 'id'> = {
-                prompt,
-                choices: [correct_answer, choice2, choice3, choice4],
-                correct_answer,
-                subject,
-            };
-            const docRef = doc(questionsRef);
-            batch.set(docRef, newQuestion);
-            count++;
+    try {
+        const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+        const batch = writeBatch(db);
+        const questionsRef = collection(db, 'questions');
+        let count = 0;
+    
+        lines.forEach(line => {
+            const [prompt, correct_answer, choice2, choice3, choice4, subject] = line.split(',').map(s => s.trim());
+            if (prompt && correct_answer && choice2 && choice3 && choice4 && subject) {
+                const newQuestion: Omit<Question, 'id'> = {
+                    prompt,
+                    choices: [correct_answer, choice2, choice3, choice4],
+                    correct_answer,
+                    subject,
+                };
+                const docRef = doc(questionsRef);
+                batch.set(docRef, newQuestion);
+                count++;
+            }
+        });
+    
+        if (count > 0) {
+            await batch.commit();
+            return { success: true, count };
         }
-    });
-
-    if (count > 0) {
-        await batch.commit();
-        return { success: true, count };
+    
+        return { success: false, count: 0 };
+    } catch (e) {
+        console.error("Upload questions from CSV failed:", e);
+        return { success: false, count: 0 };
     }
-
-    return { success: false, count: 0 };
 };
 
 // --- ADMIN FUNCTIONS ---
@@ -593,73 +634,101 @@ export const deletePlayer = async(playerId: string): Promise<{success: boolean}>
     return { success: true };
 };
 
-export const addCreds = async(playerId: string, amount: number): Promise<Profile | null> => {
+export const addCreds = async(playerId: string, amount: number): Promise<{ success: boolean, updatedUser: Profile | null }> => {
     const playerRef = doc(db, 'players', playerId);
-    await runTransaction(db, async transaction => {
-        const playerDoc = await transaction.get(playerRef);
-        if (!playerDoc.exists()) throw "Player not found";
-        const newCreds = playerDoc.data().creds + amount;
-        transaction.update(playerRef, { creds: newCreds });
-    });
-    return getPlayerById(playerId);
-}
-
-export const addXp = async(playerId: string, amount: number): Promise<Profile | null> => {
-    const playerRef = doc(db, 'players', playerId);
-     await runTransaction(db, async transaction => {
-        const playerDoc = await transaction.get(playerRef);
-        if (!playerDoc.exists()) throw "Player not found";
-        const currentXp = playerDoc.data().xp;
-        const currentLevel = playerDoc.data().level;
-        const newXp = currentXp + amount;
-        
-        const xpForNextLevel = Math.floor(100 * Math.pow(currentLevel + 1, 1.6));
-        let newLevel = currentLevel;
-        if (newXp >= xpForNextLevel) {
-            newLevel += 1; // Simple level up, can be improved to handle multiple level ups
-        }
-
-        transaction.update(playerRef, { xp: newXp, level: newLevel });
-    });
-    return getPlayerById(playerId);
-}
-
-export const giveItem = async(playerId: string, itemId: string): Promise<InventoryItem | null> => {
-    const itemDetailsSnap = await getDoc(doc(db, 'shopItems', itemId));
-    if (!itemDetailsSnap.exists()) return null;
-
-    const inventoryRef = collection(db, 'inventory');
-    const q = query(inventoryRef, where('user_id', '==', playerId), where('item_id', '==', itemId));
-    const snapshot = await getDocs(q);
-
-    if (!snapshot.empty) {
-        const existingItemRef = snapshot.docs[0].ref;
-        const currentQty = snapshot.docs[0].data().qty;
-        await updateDoc(existingItemRef, { qty: currentQty + 1 });
-        const updatedSnap = await getDoc(existingItemRef);
-        return fromSnap<InventoryItem>(updatedSnap);
-    } else {
-        const newInvItem = {
-            user_id: playerId,
-            item_id: itemId,
-            qty: 1,
-            activated: false,
-        };
-        const docRef = await addDoc(inventoryRef, newInvItem);
-        const snap = await getDoc(docRef);
-        return fromSnap<InventoryItem>(snap);
+    try {
+        await runTransaction(db, async transaction => {
+            const playerDoc = await transaction.get(playerRef);
+            if (!playerDoc.exists()) throw new Error("Player not found");
+            const newCreds = playerDoc.data().creds + amount;
+            transaction.update(playerRef, { creds: newCreds });
+        });
+        const updatedUser = await getPlayerById(playerId);
+        return { success: true, updatedUser };
+    } catch (e) {
+        console.error("Add creds failed:", e);
+        return { success: false, updatedUser: null };
     }
 }
 
-export const addBadge = async(playerId: string, badge: string): Promise<Profile | null> => {
+export const addXp = async(playerId: string, amount: number): Promise<{ success: boolean, updatedUser: Profile | null }> => {
     const playerRef = doc(db, 'players', playerId);
-    await runTransaction(db, async transaction => {
-        const playerDoc = await transaction.get(playerRef);
-        if (!playerDoc.exists()) throw "Player not found";
-        const badges = playerDoc.data().badges || [];
-        if (!badges.includes(badge)) {
-            transaction.update(playerRef, { badges: [...badges, badge] });
+    try {
+        await runTransaction(db, async transaction => {
+            const playerDoc = await transaction.get(playerRef);
+            if (!playerDoc.exists()) throw new Error("Player not found");
+            const currentXp = playerDoc.data().xp;
+            const currentLevel = playerDoc.data().level;
+            const newXp = currentXp + amount;
+            
+            const xpForNextLevel = Math.floor(100 * Math.pow(currentLevel + 1, 1.6));
+            let newLevel = currentLevel;
+            if (newXp >= xpForNextLevel) {
+                newLevel += 1; // Simple level up, can be improved to handle multiple level ups
+            }
+
+            transaction.update(playerRef, { xp: newXp, level: newLevel });
+        });
+        const updatedUser = await getPlayerById(playerId);
+        return { success: true, updatedUser };
+    } catch (e) {
+        console.error("Add XP failed:", e);
+        return { success: false, updatedUser: null };
+    }
+}
+
+export const giveItem = async(playerId: string, itemId: string): Promise<{ success: boolean, item: InventoryItem | null }> => {
+    try {
+        const itemDetailsSnap = await getDoc(doc(db, 'shopItems', itemId));
+        if (!itemDetailsSnap.exists()) {
+            throw new Error("Shop item not found");
         }
-    });
-    return getPlayerById(playerId);
+
+        const inventoryRef = collection(db, 'inventory');
+        const q = query(inventoryRef, where('user_id', '==', playerId), where('item_id', '==', itemId));
+        const snapshot = await getDocs(q);
+
+        let updatedItem: InventoryItem;
+
+        if (!snapshot.empty) {
+            const existingItemRef = snapshot.docs[0].ref;
+            const currentQty = snapshot.docs[0].data().qty;
+            await updateDoc(existingItemRef, { qty: currentQty + 1 });
+            const updatedSnap = await getDoc(existingItemRef);
+            updatedItem = fromSnap<InventoryItem>(updatedSnap);
+        } else {
+            const newInvItem = {
+                user_id: playerId,
+                item_id: itemId,
+                qty: 1,
+                activated: false,
+            };
+            const docRef = await addDoc(inventoryRef, newInvItem);
+            const snap = await getDoc(docRef);
+            updatedItem = fromSnap<InventoryItem>(snap);
+        }
+        return { success: true, item: updatedItem };
+    } catch (e) {
+        console.error("Give item failed:", e);
+        return { success: false, item: null };
+    }
+}
+
+export const addBadge = async(playerId: string, badge: string): Promise<{ success: boolean, updatedUser: Profile | null }> => {
+    const playerRef = doc(db, 'players', playerId);
+    try {
+        await runTransaction(db, async transaction => {
+            const playerDoc = await transaction.get(playerRef);
+            if (!playerDoc.exists()) throw new Error("Player not found");
+            const badges = playerDoc.data().badges || [];
+            if (!badges.includes(badge)) {
+                transaction.update(playerRef, { badges: [...badges, badge] });
+            }
+        });
+        const updatedUser = await getPlayerById(playerId);
+        return { success: true, updatedUser };
+    } catch (e) {
+        console.error("Add badge failed:", e);
+        return { success: false, updatedUser: null };
+    }
 }
