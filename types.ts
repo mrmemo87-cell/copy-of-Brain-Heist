@@ -17,7 +17,7 @@ export interface Profile {
   role?: 'admin' | 'player';
 }
 
-export type ItemType = 'consumable' | 'equip' | 'cosmetic' | 'booster';
+export type ItemType = 'consumable' | 'equip' | 'cosmetic' | 'booster' | 'permanent_boost';
 export type AccentColor = 'cyan' | 'pink' | 'purple' | 'lime';
 
 export interface ShopItem {
@@ -101,7 +101,7 @@ export interface Question {
   subject: string;
   prompt: string;
   choices: string[];
-  correct_choice_index: number;
+  correct_answer: string;
 }
 
 // --- New Feed Types ---
@@ -113,7 +113,7 @@ export interface Reaction {
     // user_ids: string[]; // To prevent multiple reactions from same user
 }
 
-export type FeedItemType = 'hack_result' | 'item_activation' | 'level_up' | 'high_score';
+export type FeedItemType = 'hack_result' | 'item_activation' | 'level_up' | 'high_score' | 'permanent_upgrade';
 
 export interface FeedItem {
     id: string;

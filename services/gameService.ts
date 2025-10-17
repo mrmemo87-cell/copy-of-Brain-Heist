@@ -1,6 +1,10 @@
-
-import { Profile, HackEmulationResult, HackResult, ShopItem, InventoryItem, UserTask, Question, FeedItem, ReactionEmoji, GameState } from '../types';
+import { Profile, HackEmulationResult, HackResult, ShopItem, InventoryItem, UserTask, Question, FeedItem, ReactionEmoji, FeedItemType, TaskTemplate } from '../types';
 import { mockCurrentUser, mockPlayers, mockShopItems, mockInventory, mockUserTasks, mockSubjects, mockQuestions, mockFeedItems, mockAdminUser } from './mockData';
+import { db, seedDatabase } from './firebase';
+import { 
+    collection, getDocs, getDoc, doc, addDoc, updateDoc, deleteDoc, query, where, runTransaction, orderBy, limit, writeBatch, documentId, collectionGroup
+} from 'firebase/firestore';
+
 
 // --- START OF SOUND SERVICE ---
 
@@ -17,6 +21,7 @@ const sounds = {
   item_activate: 'https://cdn.aistudio.dev/cohere-assets/sounds/activate.wav',
   glitch: 'https://cdn.aistudio.dev/cohere-assets/sounds/glitch.wav',
   admin_action: 'https://cdn.aistudio.dev/cohere-assets/sounds/admin.wav',
+  perm_boost: 'https://cdn.aistudio.dev/cohere-assets/sounds/upgrade.wav',
 };
 
 type SoundName = keyof typeof sounds;
@@ -59,106 +64,94 @@ export const toggleMute = () => {
 
 // --- END OF SOUND SERVICE ---
 
-// --- LOCAL STORAGE PERSISTENCE ---
-const GAME_STATE_KEY = 'brainheist_game_state';
-let gameState: GameState;
+// --- FIREBASE PERSISTENCE ---
 
-const saveGameState = () => {
-    try {
-        localStorage.setItem(GAME_STATE_KEY, JSON.stringify(gameState));
-    } catch (e) {
-        console.error("Failed to save game state to localStorage", e);
-    }
-};
-
-const loadGameState = (): GameState => {
-    try {
-        const storedState = localStorage.getItem(GAME_STATE_KEY);
-        if (storedState) {
-            const parsedState = JSON.parse(storedState);
-            if (parsedState.players && parsedState.feedItems) {
-                console.log("Game state loaded from localStorage.");
-                return parsedState;
-            }
-        }
-    } catch (e) {
-        console.error("Failed to parse game state from localStorage", e);
-    }
-    
-    console.log("Initializing new game state from mock data.");
-    return {
-        players: JSON.parse(JSON.stringify([mockCurrentUser, ...mockPlayers, mockAdminUser])),
-        shopItems: JSON.parse(JSON.stringify(mockShopItems)),
-        inventory: JSON.parse(JSON.stringify(mockInventory)),
-        userTasks: JSON.parse(JSON.stringify(mockUserTasks)),
-        questions: JSON.parse(JSON.stringify(mockQuestions)),
-        feedItems: JSON.parse(JSON.stringify(mockFeedItems)),
-    };
-};
-
-// Initialize the game state when the service module is first loaded.
-gameState = loadGameState();
-// If the state was newly initialized from mock data, save it so it persists.
-if (!localStorage.getItem(GAME_STATE_KEY)) {
-    saveGameState();
+export const initializeApp = async () => {
+    await seedDatabase();
 }
 
+// Helper to convert snapshot to object
+const fromSnap = <T,>(snap: any): T => ({ id: snap.id, ...snap.data() } as T);
 
-const SIMULATED_DELAY = 500;
-
-// Helper to simulate network delay
-const delay = <T,>(data: T): Promise<T> => 
-  new Promise(resolve => setTimeout(() => resolve(data), SIMULATED_DELAY));
 
 // --- AUTH FUNCTIONS ---
 export const login = async (username: string, password?: string): Promise<Profile | null> => {
-    const user = gameState.players.find(p => p.username === username && p.password === password);
-    if (user) {
-        return delay(JSON.parse(JSON.stringify(user)));
+    // WARNING: Storing and checking plaintext passwords is NOT SECURE.
+    // This is for demonstration purposes only. Use Firebase Authentication in a real app.
+    const playersRef = collection(db, 'players');
+    const q = query(playersRef, where('username', '==', username), where('password', '==', password));
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+        return null;
     }
-    return delay(null);
+    return fromSnap<Profile>(querySnapshot.docs[0]);
 };
 
 export const updateBio = async (userId: string, newBio: string): Promise<Profile | null> => {
-    const user = gameState.players.find(p => p.id === userId);
-    if (user) {
-        user.bio = newBio;
-        saveGameState();
-        return delay(JSON.parse(JSON.stringify(user)));
-    }
-    return delay(null);
+    const userRef = doc(db, 'players', userId);
+    await updateDoc(userRef, { bio: newBio });
+    const updatedUser = await getPlayerById(userId);
+    return updatedUser;
 }
 
 export const getPlayerById = async (userId: string): Promise<Profile | null> => {
-    const user = gameState.players.find(p => p.id === userId);
-    return user ? delay(JSON.parse(JSON.stringify(user))) : delay(null);
+    const userRef = doc(db, 'players', userId);
+    const docSnap = await getDoc(userRef);
+    if (docSnap.exists()) {
+        return fromSnap<Profile>(docSnap);
+    }
+    return null;
 };
 
 
 export const getPlayers = async (excludeId?: string): Promise<Profile[]> => {
-  let players = gameState.players.filter(p => p.role !== 'admin');
-  if (excludeId) {
-    players = players.filter(p => p.id !== excludeId)
-  }
-  return delay(JSON.parse(JSON.stringify(players)));
+    const playersRef = collection(db, 'players');
+    const q = query(playersRef, where('role', '!=', 'admin'));
+    const querySnapshot = await getDocs(q);
+    
+    let players: Profile[] = [];
+    querySnapshot.forEach((doc) => {
+        players.push(fromSnap<Profile>(doc));
+    });
+
+    if (excludeId) {
+        players = players.filter(p => p.id !== excludeId);
+    }
+    return players;
 };
 
 export const getShopItems = async (): Promise<ShopItem[]> => {
-  return delay(JSON.parse(JSON.stringify(gameState.shopItems)));
+    const itemsRef = collection(db, 'shopItems');
+    const querySnapshot = await getDocs(itemsRef);
+    const items: ShopItem[] = [];
+    querySnapshot.forEach(doc => items.push(fromSnap<ShopItem>(doc)));
+    return items;
 }
 
 export const getInventory = async (userId: string): Promise<InventoryItem[]> => {
-  const userInventory = gameState.inventory.filter(i => i.user_id === userId);
-  userInventory.forEach(invItem => {
-    invItem.itemDetails = gameState.shopItems.find(shopItem => shopItem.id === invItem.item_id);
-  });
-  return delay(JSON.parse(JSON.stringify(userInventory)));
+    const inventoryRef = collection(db, 'inventory');
+    const q = query(inventoryRef, where('user_id', '==', userId));
+    const querySnapshot = await getDocs(q);
+    
+    const userInventory: InventoryItem[] = [];
+    querySnapshot.forEach(doc => userInventory.push(fromSnap<InventoryItem>(doc)));
+
+    // Fetch item details for each inventory item
+    // In a larger app, this data would likely be denormalized for performance.
+    for (const invItem of userInventory) {
+        const itemRef = doc(db, 'shopItems', invItem.item_id);
+        const itemSnap = await getDoc(itemRef);
+        if (itemSnap.exists()) {
+            invItem.itemDetails = fromSnap<ShopItem>(itemSnap);
+        }
+    }
+    return userInventory;
 }
 
 // --- Feed Service Functions ---
-const addFeedItem = (text: string, type: 'hack_result' | 'item_activation') => {
-    const newItem: FeedItem = {
-        id: `feed-${Date.now()}`,
+const addFeedItem = async (text: string, type: FeedItemType) => {
+    await addDoc(collection(db, 'feedItems'), {
         timestamp: new Date().toISOString(),
         type: type,
         text: text,
@@ -168,25 +161,34 @@ const addFeedItem = (text: string, type: 'hack_result' | 'item_activation') => {
             { emoji: '💰', count: 0 },
             { emoji: '😂', count: 0 },
         ],
-    };
-    gameState.feedItems.unshift(newItem); // Add to the top of the feed
+    });
 };
 
 export const getFeed = async (): Promise<FeedItem[]> => {
-    return delay([...gameState.feedItems]);
+    const feedRef = collection(db, 'feedItems');
+    const q = query(feedRef, orderBy('timestamp', 'desc'), limit(50));
+    const querySnapshot = await getDocs(q);
+    const feed: FeedItem[] = [];
+    querySnapshot.forEach(doc => feed.push(fromSnap<FeedItem>(doc)));
+    return feed;
 };
 
 export const reactToFeedItem = async (feedItemId: string, emoji: ReactionEmoji): Promise<FeedItem | null> => {
-    const item = gameState.feedItems.find(i => i.id === feedItemId);
-    if (item) {
+    const itemRef = doc(db, 'feedItems', feedItemId);
+    await runTransaction(db, async (transaction) => {
+        const itemDoc = await transaction.get(itemRef);
+        if (!itemDoc.exists()) {
+            throw "Document does not exist!";
+        }
+        const item = fromSnap<FeedItem>(itemDoc);
         const reaction = item.reactions.find(r => r.emoji === emoji);
         if (reaction) {
             reaction.count++;
         }
-        saveGameState();
-        return delay({ ...item });
-    }
-    return delay(null);
+        transaction.update(itemRef, { reactions: item.reactions });
+    });
+    const updatedItemSnap = await getDoc(itemRef);
+    return fromSnap<FeedItem>(updatedItemSnap);
 };
 
 // --- Hacking Service Functions ---
@@ -199,12 +201,12 @@ export const emulateHack = async (attacker: Profile, defender: Profile): Promise
   win_prob = Math.max(0.02, Math.min(0.98, win_prob));
   const stamina_cost = 10 + Math.round(attacker.hacking_skill / 10);
 
-  return delay({
+  return {
     attacker_power: parseFloat(A_power.toFixed(2)),
     defender_power: parseFloat(D_power.toFixed(2)),
     win_prob: parseFloat(win_prob.toFixed(2)),
     stamina_cost,
-  });
+  };
 };
 
 export const performHack = async (attacker: Profile, defender: Profile): Promise<HackResult> => {
@@ -212,279 +214,452 @@ export const performHack = async (attacker: Profile, defender: Profile): Promise
   const u = Math.random();
   const win = u <= emulation.win_prob;
 
-  const mutableAttacker = gameState.players.find(p => p.id === attacker.id);
-  const mutableDefender = gameState.players.find(p => p.id === defender.id);
-
-  if (!mutableAttacker || !mutableDefender) {
-    console.error("Attacker or defender not found in game state!");
-    return delay({ win: false, loot: { creds: 0, xp: 0 }, attacker_xp_gain: 0, defender_xp_gain: 0, stamina_cost: emulation.stamina_cost });
-  }
-
-  mutableAttacker.stamina = Math.max(0, mutableAttacker.stamina - emulation.stamina_cost);
-  
   let loot = { creds: 0, xp: 0 };
   let attacker_xp_gain = 0;
   let defender_xp_gain = 0;
-  let feedText = '';
 
-  if (win) {
-    const base_loot_creds = Math.floor(Math.min(mutableDefender.creds * 0.05, 200 + 5 * mutableAttacker.hacking_skill));
-    const loot_multiplier = 1 + (Math.random() - 0.5) * 0.2;
-    loot.creds = Math.floor(Math.max(0, base_loot_creds * loot_multiplier));
-    attacker_xp_gain = Math.floor(10 + (emulation.attacker_power / emulation.defender_power) * 5);
-    loot.xp = attacker_xp_gain;
+  try {
+    await runTransaction(db, async (transaction) => {
+        const attackerRef = doc(db, 'players', attacker.id);
+        const defenderRef = doc(db, 'players', defender.id);
+
+        const attackerDoc = await transaction.get(attackerRef);
+        const defenderDoc = await transaction.get(defenderRef);
+
+        if (!attackerDoc.exists() || !defenderDoc.exists()) {
+            throw "Attacker or Defender not found!";
+        }
+        
+        const mutableAttacker = fromSnap<Profile>(attackerDoc);
+        const mutableDefender = fromSnap<Profile>(defenderDoc);
+
+        transaction.update(attackerRef, { stamina: Math.max(0, mutableAttacker.stamina - emulation.stamina_cost) });
+
+        if (win) {
+            const base_loot_creds = Math.floor(Math.min(mutableDefender.creds * 0.05, 200 + 5 * mutableAttacker.hacking_skill));
+            const loot_multiplier = 1 + (Math.random() - 0.5) * 0.2;
+            loot.creds = Math.floor(Math.max(0, base_loot_creds * loot_multiplier));
+            attacker_xp_gain = Math.floor(10 + (emulation.attacker_power / emulation.defender_power) * 5);
+            loot.xp = attacker_xp_gain;
+            
+            transaction.update(attackerRef, {
+                creds: mutableAttacker.creds + loot.creds,
+                xp: mutableAttacker.xp + loot.xp
+            });
+            transaction.update(defenderRef, {
+                creds: Math.max(0, mutableDefender.creds - loot.creds)
+            });
+        } else {
+            defender_xp_gain = Math.floor(5 + 2);
+            transaction.update(defenderRef, { xp: mutableDefender.xp + defender_xp_gain });
+        }
+    });
+
+    const feedText = win
+        ? `<strong>${attacker.display_name}</strong> just schooled <strong>${defender.display_name}</strong> and made off with <strong>$${loot.creds.toLocaleString()} creds!</strong>`
+        : `<strong>${attacker.display_name}</strong>'s hack attempt on <strong>${defender.display_name}</strong> was a total fail! LOL.`;
     
-    mutableAttacker.creds += loot.creds;
-    mutableAttacker.xp += loot.xp;
-    mutableDefender.creds = Math.max(0, mutableDefender.creds - loot.creds);
-    
-    feedText = `<strong>${attacker.display_name}</strong> just schooled <strong>${defender.display_name}</strong> and made off with <strong>$${loot.creds.toLocaleString()} creds!</strong>`;
-  } else {
-    defender_xp_gain = Math.floor(5 + 2);
-    mutableDefender.xp += defender_xp_gain;
-    feedText = `<strong>${attacker.display_name}</strong>'s hack attempt on <strong>${defender.display_name}</strong> was a total fail! LOL.`;
+    await addFeedItem(feedText, 'hack_result');
+
+  } catch (e) {
+      console.error("Hack transaction failed: ", e);
+      return { win: false, loot: { creds: 0, xp: 0 }, attacker_xp_gain: 0, defender_xp_gain: 0, stamina_cost: emulation.stamina_cost };
   }
   
-  addFeedItem(feedText, 'hack_result');
-  saveGameState();
-
-  return delay({
-    win,
-    loot,
-    attacker_xp_gain,
-    defender_xp_gain,
-    stamina_cost: emulation.stamina_cost,
-  });
+  return { win, loot, attacker_xp_gain, defender_xp_gain, stamina_cost: emulation.stamina_cost };
 };
 
 // --- Shop & Inventory Service ---
 export const buyItem = async (user: Profile, item: ShopItem): Promise<{success: boolean, message: string, updatedUser: Profile | null}> => {
-  const mutableUser = gameState.players.find(p => p.id === user.id);
-  if (!mutableUser || mutableUser.creds < item.price_creds) {
-    return delay({ success: false, message: "Not enough creds!", updatedUser: null });
-  }
-  
-  mutableUser.creds -= item.price_creds;
+  try {
+    await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, 'players', user.id);
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists() || userDoc.data().creds < item.price_creds) {
+            throw "Not enough creds!";
+        }
+        
+        transaction.update(userRef, { creds: userDoc.data().creds - item.price_creds });
 
-  if (item.payload.effect === 'stamina_refill') {
-      mutableUser.stamina = Math.min(mutableUser.stamina_max, mutableUser.stamina + item.payload.value);
-  } else {
-    const existingItem = gameState.inventory.find(i => i.user_id === user.id && i.item_id === item.id);
-    if(existingItem) {
-      existingItem.qty += 1;
-    } else {
-      gameState.inventory.push({
-        id: `inv-${Date.now()}`,
-        user_id: user.id,
-        item_id: item.id,
-        qty: 1,
-        activated: false,
-        itemDetails: item
-      });
+        if (item.payload.effect === 'stamina_refill') {
+             const currentStamina = userDoc.data().stamina;
+             const maxStamina = userDoc.data().stamina_max;
+             transaction.update(userRef, { stamina: Math.min(maxStamina, currentStamina + item.payload.value) });
+        } else {
+            const inventoryRef = collection(db, 'inventory');
+            const q = query(inventoryRef, where('user_id', '==', user.id), where('item_id', '==', item.id));
+            const snapshot = await getDocs(q); // Note: getDocs inside transaction is not recommended, but query is complex.
+            
+            if (!snapshot.empty) {
+                const existingItemDoc = snapshot.docs[0];
+                transaction.update(existingItemDoc.ref, { qty: existingItemDoc.data().qty + 1 });
+            } else {
+                 // Firestore transactions require all reads before writes.
+                 // This pattern is tricky. A better way would be a subcollection on the user.
+                 // For now, we add a new doc outside the transaction after it succeeds, which is not ideal.
+                 // The addDoc will be done after the transaction for simplicity here.
+            }
+        }
+    });
+    
+    // Handle adding new item if it's not a consumable
+    if (item.payload.effect !== 'stamina_refill') {
+        const inventoryRef = collection(db, 'inventory');
+        const q = query(inventoryRef, where('user_id', '==', user.id), where('item_id', '==', item.id));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+            await addDoc(inventoryRef, {
+                user_id: user.id,
+                item_id: item.id,
+                qty: 1,
+                activated: false
+            });
+        }
     }
-  }
 
-  saveGameState();
-  return delay({ success: true, message: `Purchased ${item.title}!`, updatedUser: { ...mutableUser } });
+    const updatedUser = await getPlayerById(user.id);
+    return { success: true, message: `Purchased ${item.title}!`, updatedUser };
+  } catch (e: any) {
+    return { success: false, message: e.toString(), updatedUser: null };
+  }
 }
 
-export const activateItem = async (user: Profile, inventoryId: string): Promise<{success: boolean, message: string, updatedItem: InventoryItem | null}> => {
-  const item = gameState.inventory.find(i => i.id === inventoryId && i.user_id === user.id);
-  if (!item) return delay({ success: false, message: "Item not found!", updatedItem: null });
-  if (item.activated) return delay({ success: false, message: "Item already active!", updatedItem: item });
+export const activateItem = async (user: Profile, inventoryId: string): Promise<{success: boolean, message: string, updatedUser: Profile | null}> => {
+    const itemRef = doc(db, 'inventory', inventoryId);
+    const itemSnap = await getDoc(itemRef);
 
-  if (item.itemDetails?.item_type === 'consumable') {
-      item.qty -= 1;
-  } else {
-      item.activated = true;
-  }
-  
-  const message = item.itemDetails?.item_type === 'consumable' ? `${item.itemDetails.title} consumed!` : `${item.itemDetails.title} activated!`;
-  
-  if (item.itemDetails && item.itemDetails.tier > 1) {
-    addFeedItem(`<strong>${user.display_name}</strong> just activated a <strong>${item.itemDetails.title}</strong>!`, 'item_activation');
-  }
+    if (!itemSnap.exists() || itemSnap.data().user_id !== user.id) {
+        return { success: false, message: "Item not found!", updatedUser: user };
+    }
+    
+    const item = fromSnap<InventoryItem>(itemSnap);
+    if(item.activated) return { success: false, message: "Item already active!", updatedUser: user };
 
-  if (item.qty <= 0) {
-      gameState.inventory = gameState.inventory.filter(i => i.id !== inventoryId);
-  }
+    const itemDetails = (await getDoc(doc(db, 'shopItems', item.item_id))).data() as ShopItem;
+    item.itemDetails = itemDetails;
 
-  saveGameState();
-  return delay({ success: true, message: message, updatedItem: {...item} });
+    // Handle permanent boosts
+    if (item.itemDetails.item_type === 'permanent_boost') {
+        try {
+            await runTransaction(db, async (transaction) => {
+                const playerRef = doc(db, 'players', user.id);
+                const invItemRef = doc(db, 'inventory', inventoryId);
+                const playerDoc = await transaction.get(playerRef);
+                if (!playerDoc.exists()) throw "Player not found";
+
+                let updateData = {};
+                if (item.itemDetails.payload.effect === 'perm_hack_skill') {
+                    updateData = { hacking_skill: playerDoc.data().hacking_skill + item.itemDetails.payload.value };
+                } else if (item.itemDetails.payload.effect === 'perm_security_level') {
+                    updateData = { security_level: playerDoc.data().security_level + item.itemDetails.payload.value };
+                }
+                transaction.update(playerRef, updateData);
+
+                // Consume item
+                if (item.qty > 1) {
+                    transaction.update(invItemRef, { qty: item.qty - 1 });
+                } else {
+                    transaction.delete(invItemRef);
+                }
+            });
+             await addFeedItem(`<strong>${user.display_name}</strong> permanently upgraded their mainframe with a <strong>${item.itemDetails.title}</strong>!`, 'permanent_upgrade');
+             const updatedUser = await getPlayerById(user.id);
+             return { success: true, message: `Used ${item.itemDetails.title} for a permanent boost!`, updatedUser };
+        } catch (e) {
+            console.error("Permanent boost failed:", e);
+            return { success: false, message: "Failed to apply boost.", updatedUser: user };
+        }
+    }
+
+
+    if (item.itemDetails?.item_type === 'consumable') {
+        if(item.qty > 1) {
+            await updateDoc(itemRef, { qty: item.qty - 1 });
+        } else {
+            await deleteDoc(itemRef);
+        }
+    } else {
+        await updateDoc(itemRef, { activated: true });
+    }
+    
+    const message = item.itemDetails?.item_type === 'consumable' ? `${item.itemDetails.title} consumed!` : `${item.itemDetails.title} activated!`;
+    
+    if (item.itemDetails && item.itemDetails.tier > 1) {
+        await addFeedItem(`<strong>${user.display_name}</strong> just activated a <strong>${item.itemDetails.title}</strong>!`, 'item_activation');
+    }
+    
+    return { success: true, message, updatedUser: user };
 };
 
 // --- Task Service Functions ---
 export const getTasks = async (userId: string): Promise<UserTask[]> => {
-  return delay(JSON.parse(JSON.stringify(gameState.userTasks)));
+    const tasksRef = collection(db, 'userTasks');
+    const q = query(tasksRef, where('user_id', '==', userId));
+    const querySnapshot = await getDocs(q);
+    const tasks: UserTask[] = [];
+    querySnapshot.forEach(doc => tasks.push(fromSnap<UserTask>(doc)));
+    
+    const templateIds = [...new Set(tasks.map(t => t.task_template_id))];
+    if (templateIds.length > 0) {
+        const templatesRef = collection(db, 'taskTemplates');
+        const templatesQuery = query(templatesRef, where(documentId(), 'in', templateIds.slice(0, 30)));
+        const templatesSnapshot = await getDocs(templatesQuery);
+        const templatesMap = new Map<string, TaskTemplate>();
+        templatesSnapshot.forEach(doc => templatesMap.set(doc.id, fromSnap<TaskTemplate>(doc)));
+
+        tasks.forEach(task => {
+            if (templatesMap.has(task.task_template_id)) {
+                task.template = templatesMap.get(task.task_template_id)!;
+            }
+        });
+    }
+
+    return tasks;
 };
 
 export const acceptTask = async (userTaskId: string): Promise<{success: boolean, updatedTask: UserTask | null}> => {
-    const task = gameState.userTasks.find(t => t.id === userTaskId);
-    if (!task || task.status !== 'available') {
-        return delay({ success: false, updatedTask: null });
+    const taskRef = doc(db, 'userTasks', userTaskId);
+    await updateDoc(taskRef, { status: 'in_progress' });
+    const taskSnap = await getDoc(taskRef);
+    const updatedTask = fromSnap<UserTask>(taskSnap);
+
+    // Re-fetch template to return the full object
+    const templateSnap = await getDoc(doc(db, 'taskTemplates', updatedTask.task_template_id));
+    if (templateSnap.exists()) {
+        updatedTask.template = fromSnap<TaskTemplate>(templateSnap);
     }
-    task.status = 'in_progress';
-    saveGameState();
-    return delay({ success: true, updatedTask: {...task} });
+
+    return { success: true, updatedTask };
 };
 
 export const claimTaskReward = async (userTaskId: string, userId: string): Promise<{success: boolean, updatedTask: UserTask | null, reward: {creds: number, xp: number} | null}> => {
-    const task = gameState.userTasks.find(t => t.id === userTaskId);
-    const user = gameState.players.find(p => p.id === userId);
-    if (!task || !user || task.status !== 'completed') {
-        return delay({ success: false, updatedTask: null, reward: null });
+    let reward: {creds: number, xp: number} | null = null;
+    try {
+        await runTransaction(db, async (transaction) => {
+            const taskRef = doc(db, 'userTasks', userTaskId);
+            const userRef = doc(db, 'players', userId);
+            
+            const taskDoc = await transaction.get(taskRef);
+            const userDoc = await transaction.get(userRef);
+
+            if (!taskDoc.exists() || !userDoc.exists() || taskDoc.data().status !== 'completed') {
+                throw "Task not ready to be claimed.";
+            }
+            
+            const templateRef = doc(db, 'taskTemplates', taskDoc.data().task_template_id);
+            const templateDoc = await transaction.get(templateRef);
+            if (!templateDoc.exists()) {
+                throw "Task template not found.";
+            }
+            const template = templateDoc.data();
+            
+            reward = {
+                creds: template.reward_creds,
+                xp: template.reward_xp,
+            };
+
+            transaction.update(taskRef, { status: 'claimed' });
+            transaction.update(userRef, {
+                creds: userDoc.data().creds + reward.creds,
+                xp: userDoc.data().xp + reward.xp,
+            });
+        });
+
+        const taskSnap = await getDoc(doc(db, 'userTasks', userTaskId));
+        const updatedTask = fromSnap<UserTask>(taskSnap);
+
+        // Re-fetch template to return the full object
+        const finalTemplateSnap = await getDoc(doc(db, 'taskTemplates', updatedTask.task_template_id));
+        if (finalTemplateSnap.exists()) {
+            updatedTask.template = fromSnap<TaskTemplate>(finalTemplateSnap);
+        }
+
+        return { success: true, updatedTask, reward };
+    } catch (e) {
+        console.error("Claim reward failed:", e);
+        return { success: false, updatedTask: null, reward: null };
     }
-    task.status = 'claimed';
-    const reward = {
-        creds: task.template.reward_creds,
-        xp: task.template.reward_xp,
-    };
-    user.creds += reward.creds;
-    user.xp += reward.xp;
-    saveGameState();
-    return delay({ success: true, updatedTask: {...task}, reward });
 };
 
 // --- Quiz Service Functions ---
 export const getSubjects = async (): Promise<string[]> => {
-  return delay([...mockSubjects]);
+  return [...mockSubjects];
 };
 
 export const getQuestions = async (subject: string): Promise<Question[]> => {
-  const questions = gameState.questions.filter(q => q.subject === subject);
-  return delay(JSON.parse(JSON.stringify(questions)));
+    const qRef = collection(db, 'questions');
+    const q = query(qRef, where('subject', '==', subject));
+    const snap = await getDocs(q);
+    const questions: Question[] = [];
+    snap.forEach(doc => questions.push(fromSnap<Question>(doc)));
+    return questions;
 };
 
-export const submitAnswer = async (questionId: string, answerIndex: number, userId: string): Promise<{correct: boolean, reward: {creds: number, xp: number}}> => {
-  const question = gameState.questions.find(q => q.id === questionId);
-  const user = gameState.players.find(p => p.id === userId);
-  if (!question || !user) {
-    return delay({ correct: false, reward: { creds: 0, xp: 0 } });
-  }
-  const correct = question.correct_choice_index === answerIndex;
-  const reward = correct ? { creds: 20, xp: 10 } : { creds: -5, xp: 0 };
+export const submitAnswer = async (question: Question, answer: string, userId: string): Promise<{correct: boolean, reward: {creds: number, xp: number}}> => {
+    const userRef = doc(db, 'players', userId);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+        return { correct: false, reward: { creds: 0, xp: 0 } };
+    }
+    const correct = question.correct_answer === answer;
+    const reward = correct ? { creds: 20, xp: 10 } : { creds: -5, xp: 0 };
+    
+    await updateDoc(userRef, {
+        creds: userSnap.data().creds + reward.creds,
+        xp: userSnap.data().xp + reward.xp
+    });
   
-  user.creds += reward.creds;
-  user.xp += reward.xp;
-  
-  saveGameState();
-  return delay({ correct, reward });
+    return { correct, reward };
 };
 
 export const getAllQuestions = async(): Promise<Question[]> => {
-  return delay(JSON.parse(JSON.stringify(gameState.questions)));
+    const qRef = collection(db, 'questions');
+    const snap = await getDocs(qRef);
+    const questions: Question[] = [];
+    snap.forEach(doc => questions.push(fromSnap<Question>(doc)));
+    return questions;
 }
 
-export const saveQuestion = async(question: Omit<Question, 'id'> & {id?: string}): Promise<Question> => {
-    if (question.id) {
-        const index = gameState.questions.findIndex(q => q.id === question.id);
-        if (index > -1) {
-            gameState.questions[index] = { ...gameState.questions[index], ...question };
-            saveGameState();
-            return delay(gameState.questions[index]);
-        }
-    }
-    const newQuestion: Question = {
-        ...question,
-        id: `question-${Math.random().toString(36).substring(2, 9)}`,
+export const saveQuestion = async(questionData: Omit<Question, 'id' | 'correct_answer'> & {id?: string, correct_choice_index: number}): Promise<Question> => {
+    const { id, correct_choice_index, ...data } = questionData;
+    const dataToSave: Omit<Question, 'id'> = {
+        ...data,
+        correct_answer: data.choices[correct_choice_index],
     };
-    gameState.questions.push(newQuestion);
-    saveGameState();
-    return delay(newQuestion);
+
+    if (id) {
+        const qRef = doc(db, 'questions', id);
+        await updateDoc(qRef, dataToSave);
+        const snap = await getDoc(qRef);
+        return fromSnap<Question>(snap);
+    }
+    const docRef = await addDoc(collection(db, 'questions'), dataToSave);
+    const snap = await getDoc(docRef);
+    return fromSnap<Question>(snap);
 }
 
 export const deleteQuestion = async(questionId: string): Promise<{success: boolean}> => {
-    const index = gameState.questions.findIndex(q => q.id === questionId);
-    if (index > -1) {
-        gameState.questions.splice(index, 1);
-        saveGameState();
-        return delay({ success: true });
-    }
-    return delay({ success: false });
+    const qRef = doc(db, 'questions', questionId);
+    await deleteDoc(qRef);
+    return { success: true };
 }
+
+export const uploadQuestionsFromCSV = async (csvContent: string): Promise<{success: boolean, count: number}> => {
+    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+    const batch = writeBatch(db);
+    const questionsRef = collection(db, 'questions');
+    let count = 0;
+
+    lines.forEach(line => {
+        const [prompt, correct_answer, choice2, choice3, choice4, subject] = line.split(',').map(s => s.trim());
+        if (prompt && correct_answer && choice2 && choice3 && choice4 && subject) {
+            const newQuestion: Omit<Question, 'id'> = {
+                prompt,
+                choices: [correct_answer, choice2, choice3, choice4],
+                correct_answer,
+                subject,
+            };
+            const docRef = doc(questionsRef);
+            batch.set(docRef, newQuestion);
+            count++;
+        }
+    });
+
+    if (count > 0) {
+        await batch.commit();
+        return { success: true, count };
+    }
+
+    return { success: false, count: 0 };
+};
 
 // --- ADMIN FUNCTIONS ---
 export const addPlayer = async(playerData: Omit<Profile, 'id' | 'avatar_url' | 'last_online_at' | 'badges'>): Promise<Profile> => {
-    const newPlayer: Profile = {
-        id: `user-${Date.now()}`,
+    const newPlayer: Omit<Profile, 'id'> = {
         ...playerData,
         avatar_url: `https://picsum.photos/seed/${Date.now()}/200`,
         last_online_at: new Date().toISOString(),
         badges: [],
         role: 'player',
     };
-    gameState.players.push(newPlayer);
-    saveGameState();
-    return delay(newPlayer);
+    const docRef = await addDoc(collection(db, 'players'), newPlayer);
+    const snap = await getDoc(docRef);
+    return fromSnap<Profile>(snap);
 };
 
 export const deletePlayer = async(playerId: string): Promise<{success: boolean}> => {
-    const index = gameState.players.findIndex(p => p.id === playerId);
-    if (index > -1) {
-        gameState.players.splice(index, 1);
-        saveGameState();
-        return delay({ success: true });
-    }
-    return delay({ success: false });
+    await deleteDoc(doc(db, 'players', playerId));
+    return { success: true };
 };
 
 export const addCreds = async(playerId: string, amount: number): Promise<Profile | null> => {
-    const player = gameState.players.find(p => p.id === playerId);
-    if(player) {
-        player.creds += amount;
-        saveGameState();
-        return delay({ ...player });
-    }
-    return delay(null);
+    const playerRef = doc(db, 'players', playerId);
+    await runTransaction(db, async transaction => {
+        const playerDoc = await transaction.get(playerRef);
+        if (!playerDoc.exists()) throw "Player not found";
+        const newCreds = playerDoc.data().creds + amount;
+        transaction.update(playerRef, { creds: newCreds });
+    });
+    return getPlayerById(playerId);
 }
 
 export const addXp = async(playerId: string, amount: number): Promise<Profile | null> => {
-    const player = gameState.players.find(p => p.id === playerId);
-    if(player) {
-        player.xp += amount;
-        // Simple level up logic for demonstration
-        const xpForNextLevel = Math.floor(100 * Math.pow(player.level + 1, 1.6));
-        if (player.xp >= xpForNextLevel) {
-            player.level += 1;
+    const playerRef = doc(db, 'players', playerId);
+     await runTransaction(db, async transaction => {
+        const playerDoc = await transaction.get(playerRef);
+        if (!playerDoc.exists()) throw "Player not found";
+        const currentXp = playerDoc.data().xp;
+        const currentLevel = playerDoc.data().level;
+        const newXp = currentXp + amount;
+        
+        const xpForNextLevel = Math.floor(100 * Math.pow(currentLevel + 1, 1.6));
+        let newLevel = currentLevel;
+        if (newXp >= xpForNextLevel) {
+            newLevel += 1; // Simple level up, can be improved to handle multiple level ups
         }
-        saveGameState();
-        return delay({ ...player });
-    }
-    return delay(null);
+
+        transaction.update(playerRef, { xp: newXp, level: newLevel });
+    });
+    return getPlayerById(playerId);
 }
 
 export const giveItem = async(playerId: string, itemId: string): Promise<InventoryItem | null> => {
-    const player = gameState.players.find(p => p.id === playerId);
-    const itemDetails = gameState.shopItems.find(i => i.id === itemId);
-    if (player && itemDetails) {
-        const existingItem = gameState.inventory.find(i => i.user_id === playerId && i.item_id === itemId);
-        if(existingItem) {
-            existingItem.qty += 1;
-            saveGameState();
-            return delay({ ...existingItem });
-        } else {
-            const newInventoryItem: InventoryItem = {
-                id: `inv-${Date.now()}`,
-                user_id: playerId,
-                item_id: itemId,
-                qty: 1,
-                activated: false,
-                itemDetails: itemDetails,
-            };
-            gameState.inventory.push(newInventoryItem);
-            saveGameState();
-            return delay(newInventoryItem);
-        }
+    const itemDetailsSnap = await getDoc(doc(db, 'shopItems', itemId));
+    if (!itemDetailsSnap.exists()) return null;
+
+    const inventoryRef = collection(db, 'inventory');
+    const q = query(inventoryRef, where('user_id', '==', playerId), where('item_id', '==', itemId));
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+        const existingItemRef = snapshot.docs[0].ref;
+        const currentQty = snapshot.docs[0].data().qty;
+        await updateDoc(existingItemRef, { qty: currentQty + 1 });
+        const updatedSnap = await getDoc(existingItemRef);
+        return fromSnap<InventoryItem>(updatedSnap);
+    } else {
+        const newInvItem = {
+            user_id: playerId,
+            item_id: itemId,
+            qty: 1,
+            activated: false,
+        };
+        const docRef = await addDoc(inventoryRef, newInvItem);
+        const snap = await getDoc(docRef);
+        return fromSnap<InventoryItem>(snap);
     }
-    return delay(null);
 }
 
 export const addBadge = async(playerId: string, badge: string): Promise<Profile | null> => {
-    const player = gameState.players.find(p => p.id === playerId);
-    if(player && !player.badges.includes(badge)) {
-        player.badges.push(badge);
-        saveGameState();
-        return delay({ ...player });
-    }
-    return delay(null);
+    const playerRef = doc(db, 'players', playerId);
+    await runTransaction(db, async transaction => {
+        const playerDoc = await transaction.get(playerRef);
+        if (!playerDoc.exists()) throw "Player not found";
+        const badges = playerDoc.data().badges || [];
+        if (!badges.includes(badge)) {
+            transaction.update(playerRef, { badges: [...badges, badge] });
+        }
+    });
+    return getPlayerById(playerId);
 }

@@ -131,6 +131,28 @@ export const mockShopItems: ShopItem[] = [
     image_url: 'https://picsum.photos/seed/item-003/200',
   },
   {
+    id: 'item-006',
+    slug: 'perm-hack-boost-1',
+    title: 'Neural Upgrade Chip',
+    description: 'A rare processor that permanently increases your base Hacking Skill by 1.',
+    price_creds: 5000,
+    tier: 3,
+    item_type: 'permanent_boost',
+    payload: { effect: 'perm_hack_skill', value: 1 },
+    image_url: 'https://picsum.photos/seed/item-006/200',
+  },
+  {
+    id: 'item-007',
+    slug: 'perm-security-boost-1',
+    title: 'Quantum Firewall Patch',
+    description: 'Applies a quantum entanglement algorithm to permanently boost your Security Level by 1.',
+    price_creds: 5000,
+    tier: 3,
+    item_type: 'permanent_boost',
+    payload: { effect: 'perm_security_level', value: 1 },
+    image_url: 'https://picsum.photos/seed/item-007/200',
+  },
+  {
     id: 'item-005',
     slug: 'stamina-refill-large',
     title: 'Hyper-Caffeinated Jolt',
@@ -245,7 +267,7 @@ export const mockSubjects: string[] = [
     'Russian literature', 'German language', 'Geography', 'Kyrgyz language', 'Kyrgyz history'
 ];
 
-export const mockQuestions: Question[] = [
+export const mockQuestions: (Omit<Question, 'correct_answer'> & { correct_choice_index: number })[] = [
   {
     id: 'math-001',
     subject: 'Maths',

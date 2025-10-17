@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Profile, HackEmulationResult, HackResult } from '../types';
 import { emulateHack, performHack, playSound } from '../services/gameService';
@@ -30,8 +29,6 @@ const HackModal: React.FC<HackModalProps> = ({ attacker, defender, onClose, onHa
   const [emulation, setEmulation] = useState<HackEmulationResult | null>(null);
   const [result, setResult] = useState<HackResult | null>(null);
   const [terminalText, setTerminalText] = useState<string[]>([]);
-  // Fix: Initialize useRef with null to fix potential issues with older @types/react versions
-  // that might not support parameter-less calls to useRef, which seems to be the cause of the error.
   const intervalRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -43,8 +40,9 @@ const HackModal: React.FC<HackModalProps> = ({ attacker, defender, onClose, onHa
     runEmulation();
 
     return () => {
-        if (intervalRef.current !== null) {
+        if (intervalRef.current) {
             clearInterval(intervalRef.current);
+            intervalRef.current = null;
         }
     };
   }, [attacker, defender]);
@@ -58,8 +56,9 @@ const HackModal: React.FC<HackModalProps> = ({ attacker, defender, onClose, onHa
         setTerminalText(prev => [...prev, HACK_TERMINAL_LINES[lineIndex]]);
         lineIndex++;
         if (lineIndex >= HACK_TERMINAL_LINES.length) {
-            if (intervalRef.current !== null) {
+            if (intervalRef.current) {
                 clearInterval(intervalRef.current);
+                intervalRef.current = null;
             }
             handleConfirmHack();
         }
@@ -144,7 +143,6 @@ const HackModal: React.FC<HackModalProps> = ({ attacker, defender, onClose, onHa
                         </h2>
                         {result.win ? (
                             <div>
-                                {/* FIX: Use 'creds' instead of 'coins' to match the HackResult type. */}
                                 <p className="text-lg">You looted <span className="font-bold text-yellow-300">{result.loot.creds.toLocaleString()} Creds!</span></p>
                                 <p className="text-lg">You gained <span className="font-bold">{result.loot.xp} XP!</span></p>
                             </div>
@@ -153,7 +151,7 @@ const HackModal: React.FC<HackModalProps> = ({ attacker, defender, onClose, onHa
                         )}
                         <p className="text-sm text-gray-400">Stamina Used: {result.stamina_cost}</p>
                         <button onClick={onClose} className="btn-neon w-full bg-gray-600 text-white font-bold py-2 mt-4 rounded-lg">
-                            DISCONNECT
+                            NEXT VICTIM
                         </button>
                     </div>
                 </div>

@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Profile, ShopItem, InventoryItem, HackResult, UserTask, Question, FeedItem, ReactionEmoji, AccentColor } from './types';
 import * as GameService from './services/gameService';
@@ -22,8 +20,6 @@ const VIEW_NAMES: Record<View, string> = {
 
 const AnimatedCounter: React.FC<{ value: number }> = ({ value }) => {
     const [displayValue, setDisplayValue] = useState(value);
-    // Fix: Initialize useRef with null, assuming the error on a nearby line points to this.
-    // This resolves potential issues with older @types/react versions not supporting parameter-less useRef.
     const animationRef = useRef<number | null>(null);
     const prevValueRef = useRef(value);
 
@@ -51,9 +47,9 @@ const AnimatedCounter: React.FC<{ value: number }> = ({ value }) => {
         animationRef.current = requestAnimationFrame(animate);
 
         return () => {
-            // Fix: Update check to be compatible with the new null initialization.
-            if (animationRef.current !== null) {
+            if (animationRef.current) {
                 cancelAnimationFrame(animationRef.current);
+                animationRef.current = null;
             }
             prevValueRef.current = endValue;
         };
@@ -86,7 +82,7 @@ const XPProgressBar: React.FC<{ xp: number, level: number }> = ({ xp, level }) =
     );
 };
 
-const ProfileView: React.FC<{ user: Profile, inventory: InventoryItem[], onActivateItem: (itemId: string) => void, onEditBio: () => void }> = ({ user, inventory, onActivateItem, onEditBio }) => {
+const ProfileView: React.FC<{ user: Profile, inventory: InventoryItem[], onActivateItem: (itemId: string) => void, onEditBio: () => void, activationAnimation: { itemId: string, type: 'perm' | 'normal' } | null; }> = ({ user, inventory, onActivateItem, onEditBio, activationAnimation }) => {
     const getStatusColor = () => {
         const lastSeen = new Date(user.last_online_at).getTime();
         const now = new Date().getTime();
@@ -138,12 +134,10 @@ const ProfileView: React.FC<{ user: Profile, inventory: InventoryItem[], onActiv
             </div>
              <div className="grid grid-cols-2 gap-4">
                 <NeonCard className="flex flex-col items-center justify-center p-4">
-                    <span className="text-gray-400 text-sm">HACKING SKILL</span>
-                    <span className="font-orbitron text-4xl font-bold text-pink-400">{user.hacking_skill}</span>
+                     <RadialGauge value={user.hacking_skill} max={100} size={120} strokeWidth={10} colorFrom="#FF2D91" colorTo="#a855f7" label="Hack Skill" />
                 </NeonCard>
                 <NeonCard className="flex flex-col items-center justify-center p-4">
-                    <span className="text-gray-400 text-sm">SECURITY LEVEL</span>
-                    <span className="font-orbitron text-4xl font-bold text-cyan-400">{user.security_level}</span>
+                     <RadialGauge value={user.security_level} max={100} size={120} strokeWidth={10} colorFrom="#00D0E8" colorTo="#A6FF4D" label="Security" />
                 </NeonCard>
             </div>
 
@@ -155,8 +149,15 @@ const ProfileView: React.FC<{ user: Profile, inventory: InventoryItem[], onActiv
             <div>
                 <h3 className="font-orbitron text-2xl mb-4 neon-glow-lime">Quick Inventory</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {inventory.length > 0 ? inventory.map(item => (
-                        <NeonCard key={item.id} accent="lime" className="flex flex-col items-center text-center p-3">
+                    {inventory.length > 0 ? inventory.map(item => {
+                        const animationClass =
+                            activationAnimation?.itemId === item.id
+                                ? activationAnimation.type === 'perm'
+                                    ? 'animate-flash-purple'
+                                    : 'animate-flash-lime'
+                                : '';
+                        return (
+                        <NeonCard key={item.id} accent="lime" className={`flex flex-col items-center text-center p-3 ${animationClass}`}>
                             <img src={item.itemDetails?.image_url} alt={item.itemDetails?.title} className="w-16 h-16 object-cover rounded-md mb-2" />
                             <h4 className="font-bold text-sm leading-tight h-8 flex items-center justify-center">{item.itemDetails?.title}</h4>
                             <p className="text-xl font-bold my-1">x{item.qty}</p>
@@ -168,7 +169,7 @@ const ProfileView: React.FC<{ user: Profile, inventory: InventoryItem[], onActiv
                                 {item.activated ? 'ACTIVE' : 'ACTIVATE'}
                             </button>
                         </NeonCard>
-                    )) : <p className="text-gray-500 col-span-full">No items in inventory.</p>}
+                    )}) : <p className="text-gray-500 col-span-full">No items in inventory.</p>}
                 </div>
             </div>
         </div>
@@ -205,15 +206,18 @@ const FeedItemCard: React.FC<{
     onReact: (feedItemId: string, emoji: ReactionEmoji) => void;
     onPlayerClick: (player: Profile) => void;
 }> = ({ item, players, onReact, onPlayerClick }) => {
-    const getFeedItemStyle = (text: string) => {
-        if (text.includes('pwned') || text.includes('swiped') || text.includes('made off')) {
+    const getFeedItemStyle = (item: FeedItem) => {
+        if (item.type === 'permanent_upgrade') {
+            return { accent: 'purple' as AccentColor, icon: '🚀' };
+        }
+        if (item.text.includes('pwned') || item.text.includes('swiped') || item.text.includes('made off')) {
             return { accent: 'lime' as AccentColor, icon: '💰' };
         }
-        if (text.includes('failed')) {
+        if (item.text.includes('failed')) {
             return { accent: 'pink' as AccentColor, icon: '💀' };
         }
-        if (text.includes('activated')) {
-            return { accent: 'purple' as AccentColor, icon: '🔥' };
+        if (item.text.includes('activated')) {
+            return { accent: 'cyan' as AccentColor, icon: '🔥' };
         }
         return { accent: 'cyan' as AccentColor, icon: 'ℹ️' };
     };
@@ -232,14 +236,14 @@ const FeedItemCard: React.FC<{
         });
     };
 
-    const style = getFeedItemStyle(item.text);
+    const style = getFeedItemStyle(item);
     return (
         <div className={`neon-border accent-${style.accent} rounded-lg p-3 mb-3 text-sm`}>
             <div className="flex items-start space-x-2">
                 <span className="text-lg">{style.icon}</span>
                 <p className="text-gray-300 flex-1">{renderWithClickableNames(item.text)}</p>
             </div>
-            <div className="reaction-bar flex items-center space-x-3 border-t border-lime-500/20 pt-2 mt-2 ml-8">
+            <div className={`reaction-bar flex items-center space-x-3 border-t border-${style.accent}-500/20 pt-2 mt-2 ml-8`}>
                 {item.reactions.map(reaction => (
                     <button key={reaction.emoji} onClick={() => onReact(item.id, reaction.emoji)} className="flex items-center space-x-1 text-gray-400 hover:text-white">
                         <span>{reaction.emoji}</span>
@@ -308,6 +312,19 @@ const TaskCard: React.FC<{
     acceptingTaskId: string | null,
     acceptanceStatus: { taskId: string; status: 'success' | 'error' } | null
 }> = ({ task, onAccept, onClaim, acceptingTaskId, acceptanceStatus }) => {
+    const [showReward, setShowReward] = useState(false);
+    const prevStatusRef = useRef(task.status);
+
+    useEffect(() => {
+        if (prevStatusRef.current === 'completed' && task.status === 'claimed') {
+            setShowReward(true);
+            setTimeout(() => {
+                setShowReward(false);
+            }, 1500);
+        }
+        prevStatusRef.current = task.status;
+    }, [task.status]);
+    
     const accentColors: Record<string, string> = {
         daily: 'cyan',
         weekly: 'lime',
@@ -362,7 +379,17 @@ const TaskCard: React.FC<{
     };
 
     return (
-        <NeonCard accent={accentColor as any}>
+        <NeonCard accent={accentColor as any} className={`relative overflow-hidden ${showReward ? 'animate-flash-lime' : ''}`}>
+             {showReward && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
+                    <span className="font-orbitron font-bold text-yellow-400 animate-fly-up-fade-out" style={{ animationDelay: '0s' }}>
+                        +{task.template.reward_creds} Creds
+                    </span>
+                    <span className="font-orbitron font-bold text-lime-400 animate-fly-up-fade-out" style={{ animationDelay: '0.2s' }}>
+                        +{task.template.reward_xp} XP
+                    </span>
+                </div>
+            )}
             <div className="flex justify-between items-start">
                 <div>
                     <span className={`text-xs uppercase font-bold ${colorMap[accentColor]}`}>{task.template.task_type}</span>
@@ -414,6 +441,7 @@ const TasksView: React.FC<{
 
 const App: React.FC = () => {
   // State management
+  const [isInitializing, setIsInitializing] = useState(true);
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [players, setPlayers] = useState<Profile[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -429,10 +457,14 @@ const App: React.FC = () => {
   const [bioText, setBioText] = useState('');
   const [playerPeek, setPlayerPeek] = useState<Profile | null>(null);
 
+  // Animation states
+  const [activationAnimation, setActivationAnimation] = useState<{itemId: string, type: 'perm' | 'normal'} | null>(null);
+
   const [subjects, setSubjects] = useState<string[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentSubject, setCurrentSubject] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [shuffledChoices, setShuffledChoices] = useState<string[]>([]);
   const [score, setScore] = useState(0);
 
   const [acceptingTaskId, setAcceptingTaskId] = useState<string | null>(null);
@@ -454,7 +486,7 @@ const App: React.FC = () => {
   const [shopItems, setShopItems] = useState<ShopItem[]>([]);
   
   // Admin Question Management State
-  const getInitialEditingQuestion = (): Omit<Question, 'id'> & { id?: string } => ({
+  const getInitialEditingQuestion = (): Omit<Question, 'id' | 'correct_answer'> & { id?: string, correct_choice_index: number } => ({
     subject: subjects[0] || '',
     prompt: '',
     choices: ['', '', '', ''],
@@ -464,9 +496,14 @@ const App: React.FC = () => {
   const [editingQuestion, setEditingQuestion] = useState(getInitialEditingQuestion());
 
 
-  // Sound preloading
+  // App Initialization
   useEffect(() => {
-    GameService.preloadSounds();
+    const initializeApp = async () => {
+        GameService.preloadSounds();
+        await GameService.initializeApp();
+        setIsInitializing(false);
+    };
+    initializeApp();
   }, []);
   
   useEffect(() => {
@@ -526,6 +563,8 @@ const App: React.FC = () => {
         if (updatedUser) setCurrentUser(updatedUser);
     }
     GameService.getFeed().then(setFeed);
+    // Refresh target player data
+    GameService.getPlayers(currentUser?.id).then(setPlayers);
   };
 
   const handlePurchase = async (item: ShopItem) => {
@@ -544,8 +583,22 @@ const App: React.FC = () => {
     if (!currentUser) return;
     const result = await GameService.activateItem(currentUser, inventoryId);
     if (result.success) {
-        GameService.playSound('item_activate');
+        const isPermBoost = result.updatedUser?.id === currentUser.id;
+        
+        setActivationAnimation({
+            itemId: inventoryId,
+            type: isPermBoost ? 'perm' : 'normal'
+        });
+        setTimeout(() => setActivationAnimation(null), 1000);
+
+        if (isPermBoost) {
+           setCurrentUser(result.updatedUser);
+           GameService.playSound('perm_boost');
+        } else {
+            GameService.playSound('item_activate');
+        }
         GameService.getInventory(currentUser.id).then(setInventory);
+        GameService.getFeed().then(setFeed);
     } else {
         alert(result.message);
     }
@@ -583,7 +636,6 @@ const App: React.FC = () => {
   const handleClaimReward = async (taskId: string) => {
       if(!currentUser) return;
       GameService.playSound('task_claim');
-      // FIX: Pass the current user's ID to the claimTaskReward function.
       const res = await GameService.claimTaskReward(taskId, currentUser.id);
       if (res.success && res.updatedTask && res.reward) {
           setTasks(prevTasks => prevTasks.map(t => t.id === taskId ? res.updatedTask! : t));
@@ -599,19 +651,31 @@ const App: React.FC = () => {
       setScore(0);
       setView('quiz');
   };
+
+  // Shuffle choices when question changes
+  useEffect(() => {
+    if (view === 'quiz' && questions[currentQuestionIndex]) {
+        const choices = [...questions[currentQuestionIndex].choices];
+        // Simple shuffle (Fisher-Yates)
+        for (let i = choices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [choices[i], choices[j]] = [choices[j], choices[i]];
+        }
+        setShuffledChoices(choices);
+    }
+  }, [view, questions, currentQuestionIndex]);
   
-  const handleAnswer = async (answerIndex: number) => {
+  const handleAnswer = async (answer: string) => {
     if(!currentUser) return;
     const question = questions[currentQuestionIndex];
-    // FIX: Pass the current user's ID to the submitAnswer function.
-    const result = await GameService.submitAnswer(question.id, answerIndex, currentUser.id);
+    const result = await GameService.submitAnswer(question, answer, currentUser.id);
     if (result.correct) {
         GameService.playSound('quiz_correct');
         setScore(s => s + 1);
-        setCurrentUser({...currentUser, creds: currentUser.creds + result.reward.creds, xp: currentUser.xp + result.reward.xp });
+        setCurrentUser(prev => prev ? {...prev, creds: prev.creds + result.reward.creds, xp: prev.xp + result.reward.xp } : null);
     } else {
         GameService.playSound('quiz_incorrect');
-        setCurrentUser({...currentUser, creds: currentUser.creds + result.reward.creds });
+        setCurrentUser(prev => prev ? {...prev, creds: prev.creds + result.reward.creds } : null);
     }
 
     if (currentQuestionIndex < questions.length - 1) {
@@ -702,7 +766,12 @@ const App: React.FC = () => {
   };
 
   const handleEditQuestion = (question: Question) => {
-    setEditingQuestion(question);
+    // We don't have the index, so we find it. Assume first choice is correct for editing.
+    const correctIndex = question.choices.findIndex(c => c === question.correct_answer);
+    setEditingQuestion({
+        ...question,
+        correct_choice_index: correctIndex !== -1 ? correctIndex : 0,
+    });
   };
 
   const handleDeleteQuestion = async (questionId: string) => {
@@ -712,7 +781,38 @@ const App: React.FC = () => {
         GameService.playSound('hack_fail');
     }
   };
+  
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const csvContent = event.target?.result as string;
+            const result = await GameService.uploadQuestionsFromCSV(csvContent);
+            if (result.success) {
+                alert(`${result.count} questions uploaded successfully!`);
+                GameService.getAllQuestions().then(setAllQuestions);
+                GameService.playSound('admin_action');
+            } else {
+                alert('Failed to upload questions. Check file format and content.');
+                GameService.playSound('hack_fail');
+            }
+        };
+        reader.readAsText(file);
+    }
+  };
 
+
+  if (isInitializing) {
+    return (
+        <div className="h-screen w-full flex items-center justify-center hacker-bg">
+            <div className="text-center">
+                <h2 className="font-orbitron text-3xl animate-pulse text-cyan-400">CONNECTING TO THE GRID...</h2>
+                <p className="text-gray-400 mt-2">Initializing database connection...</p>
+            </div>
+        </div>
+    );
+  }
 
   if (!currentUser) {
     return (
@@ -738,7 +838,7 @@ const App: React.FC = () => {
                     <h2 className="font-orbitron text-3xl mb-6 neon-glow-cyan">{VIEW_NAMES.home}</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {players.map(player => (
-                            <PlayerCard key={player.id} player={player} onHack={handleHack} />
+                            <PlayerCard key={player.id} attacker={currentUser} player={player} onHack={handleHack} onViewProfile={handlePlayerClick} />
                         ))}
                     </div>
                 </div>
@@ -748,7 +848,7 @@ const App: React.FC = () => {
         case 'leaderboard':
             return <LeaderboardView players={[currentUser, ...players]} feed={feed} onReact={handleReactToFeed} onPlayerClick={handlePlayerClick} />;
         case 'profile':
-            return <ProfileView user={currentUser} inventory={inventory} onActivateItem={handleActivateItem} onEditBio={handleEditBio} />;
+            return <ProfileView user={currentUser} inventory={inventory} onActivateItem={handleActivateItem} onEditBio={handleEditBio} activationAnimation={activationAnimation} />;
         case 'tasks':
             return <TasksView tasks={tasks} onAccept={handleAcceptTask} onClaim={handleClaimReward} onSubjectsClick={() => setView('subjects')} acceptingTaskId={acceptingTaskId} acceptanceStatus={acceptanceStatus} />;
         case 'subjects':
@@ -774,8 +874,8 @@ const App: React.FC = () => {
                     <NeonCard accent="purple">
                         <p className="text-xl mb-6">{question.prompt}</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {question.choices.map((choice, index) => (
-                                <button key={index} onClick={() => handleAnswer(index)} className="btn-neon bg-purple-600 p-3 rounded-lg text-left">
+                            {shuffledChoices.map((choice, index) => (
+                                <button key={index} onClick={() => handleAnswer(choice)} className="btn-neon bg-purple-600 p-3 rounded-lg text-left">
                                     {choice}
                                 </button>
                             ))}
@@ -800,7 +900,27 @@ const App: React.FC = () => {
                     <h2 className="font-orbitron text-3xl mb-6 neon-glow-pink">Admin Panel</h2>
                     
                     <NeonCard accent="purple">
-                        <h3 className="font-orbitron text-xl mb-4">Manage Questions</h3>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-orbitron text-xl">Manage Questions</h3>
+                            <div className="relative group">
+                                <span className="text-cyan-400 cursor-pointer font-bold text-2xl">?</span>
+                                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-72 bg-panel p-3 rounded-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                    <h5 className="font-bold mb-1">CSV Format Guide</h5>
+                                    <p>Upload a `.csv` file with columns in this exact order:</p>
+                                    <p className="font-mono bg-black/50 p-1 rounded my-1">prompt,correct_answer,wrong_answer_1,wrong_answer_2,wrong_answer_3,subject</p>
+                                    <p>No headers. Each line is a new question.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold mb-2">Upload Questions CSV</label>
+                            <input type="file" accept=".csv" onChange={handleFileChange} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700" />
+                        </div>
+
+                        <hr className="my-6 border-purple-500/30" />
+                        
+                        <h4 className="font-orbitron text-lg mb-4">Add/Edit Manually</h4>
                         <form onSubmit={handleSaveQuestion} className="space-y-4">
                             <div>
                                 <label className="block text-sm font-bold mb-1">Subject</label>
@@ -867,7 +987,7 @@ const App: React.FC = () => {
                          <div className="grid grid-cols-2 gap-4">
                             <select value={selectedPlayer || ''} onChange={e => setSelectedPlayer(e.target.value)} className="col-span-2 bg-gray-800 p-2 rounded border border-lime-400/50">
                                 <option value="" disabled>Select a player</option>
-                                {[currentUser, ...players].map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
+                                {[...players, currentUser].filter(p => p.role !== 'admin').map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
                             </select>
                             <input type="number" placeholder="Amount" value={adminAmount} onChange={e => setAdminAmount(Number(e.target.value))} className="bg-gray-800 p-2 rounded border border-lime-400/50" />
                              <div className="flex gap-2">
@@ -920,7 +1040,7 @@ const App: React.FC = () => {
                 </div>
             </div>
         </header>
-        <main className="flex-grow overflow-y-auto container mx-auto px-4 py-4">
+        <main className="flex-grow overflow-y-auto container mx-auto px-4 py-4 animate-fade-in-scale-up" key={view}>
             {renderView()}
         </main>
         <footer className="flex-shrink-0 bg-panel/80 backdrop-blur-sm border-t border-glass-border z-20 p-2">
@@ -946,8 +1066,15 @@ const App: React.FC = () => {
         )}
         {playerPeek && (
              <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" onClick={() => setPlayerPeek(null)}>
-                <div onClick={e => e.stopPropagation()}>
-                    <PlayerCard player={playerPeek} onHack={p => { setPlayerPeek(null); handleHack(p); }} />
+                <div onClick={e => e.stopPropagation()} className="relative">
+                    <button onClick={() => setPlayerPeek(null)} className="absolute -top-2 -right-2 text-black bg-white rounded-full h-6 w-6 flex items-center justify-center font-bold z-10">&times;</button>
+                    <div className="w-full max-w-sm">
+                        <PlayerCard player={playerPeek} attacker={currentUser} onHack={p => { setPlayerPeek(null); handleHack(p); }} onViewProfile={() => {}} />
+                        <NeonCard accent="pink" className="mt-2">
+                            <h4 className="font-orbitron text-md font-bold neon-glow-pink">Bio</h4>
+                            <p className="text-sm italic text-gray-300 mt-1">"{playerPeek.bio}"</p>
+                        </NeonCard>
+                    </div>
                 </div>
              </div>
         )}
