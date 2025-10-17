@@ -122,3 +122,13 @@ export interface FeedItem {
     text: string;
     reactions: Reaction[];
 }
+
+// --- New Game State Type for Persistence ---
+export interface GameState {
+    players: Profile[];
+    shopItems: ShopItem[];
+    inventory: InventoryItem[];
+    userTasks: UserTask[];
+    questions: Question[];
+    feedItems: FeedItem[];
+}

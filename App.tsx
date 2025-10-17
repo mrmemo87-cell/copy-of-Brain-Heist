@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Profile, ShopItem, InventoryItem, HackResult, UserTask, Question, FeedItem, ReactionEmoji, AccentColor } from './types';
 import * as GameService from './services/gameService';
@@ -582,7 +583,8 @@ const App: React.FC = () => {
   const handleClaimReward = async (taskId: string) => {
       if(!currentUser) return;
       GameService.playSound('task_claim');
-      const res = await GameService.claimTaskReward(taskId);
+      // FIX: Pass the current user's ID to the claimTaskReward function.
+      const res = await GameService.claimTaskReward(taskId, currentUser.id);
       if (res.success && res.updatedTask && res.reward) {
           setTasks(prevTasks => prevTasks.map(t => t.id === taskId ? res.updatedTask! : t));
           setCurrentUser(prevUser => prevUser ? { ...prevUser, creds: prevUser.creds + res.reward!.creds, xp: prevUser.xp + res.reward!.xp } : null);
@@ -601,7 +603,8 @@ const App: React.FC = () => {
   const handleAnswer = async (answerIndex: number) => {
     if(!currentUser) return;
     const question = questions[currentQuestionIndex];
-    const result = await GameService.submitAnswer(question.id, answerIndex);
+    // FIX: Pass the current user's ID to the submitAnswer function.
+    const result = await GameService.submitAnswer(question.id, answerIndex, currentUser.id);
     if (result.correct) {
         GameService.playSound('quiz_correct');
         setScore(s => s + 1);
