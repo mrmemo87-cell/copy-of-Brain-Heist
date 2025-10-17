@@ -1,5 +1,30 @@
+
 import { Profile, HackEmulationResult, HackResult, ShopItem, InventoryItem, UserTask, Question, FeedItem, ReactionEmoji } from '../types';
 import { mockCurrentUser, mockPlayers, mockShopItems, mockInventory, mockUserTasks, mockSubjects, mockQuestions, mockFeedItems } from './mockData';
+
+// --- LOCAL STORAGE PERSISTENCE ---
+const CUSTOM_PLAYERS_KEY = 'brainheist_custom_players';
+
+const getCustomPlayers = (): Profile[] => {
+    try {
+        const storedPlayers = localStorage.getItem(CUSTOM_PLAYERS_KEY);
+        if (storedPlayers) {
+            return JSON.parse(storedPlayers);
+        }
+    } catch (e) {
+        console.error("Failed to parse custom players from localStorage", e);
+    }
+    return [];
+};
+
+const saveCustomPlayers = (players: Profile[]) => {
+    try {
+        localStorage.setItem(CUSTOM_PLAYERS_KEY, JSON.stringify(players));
+    } catch (e) {
+        console.error("Failed to save custom players to localStorage", e);
+    }
+};
+
 
 // --- START OF SOUND SERVICE ---
 
@@ -60,7 +85,7 @@ export const toggleMute = () => {
 
 
 const SIMULATED_DELAY = 500;
-let ALL_MOCK_PLAYERS = [mockCurrentUser, ...mockPlayers];
+let ALL_MOCK_PLAYERS = [mockCurrentUser, ...mockPlayers, ...getCustomPlayers()];
 
 // Helper to simulate network delay
 const delay = <T,>(data: T): Promise<T> => 
@@ -337,7 +362,11 @@ export const addPlayer = async(playerData: Omit<Profile, 'id' | 'avatar_url' | '
         badges: [],
     };
     ALL_MOCK_PLAYERS.push(newPlayer);
-    mockPlayers.push(newPlayer); // Also add to the exported list if needed elsewhere
+    
+    const customPlayers = getCustomPlayers();
+    customPlayers.push(newPlayer);
+    saveCustomPlayers(customPlayers);
+
     return delay(newPlayer);
 };
 
@@ -345,10 +374,11 @@ export const deletePlayer = async(playerId: string): Promise<{success: boolean}>
     const index = ALL_MOCK_PLAYERS.findIndex(p => p.id === playerId);
     if (index > -1) {
         ALL_MOCK_PLAYERS.splice(index, 1);
-        const mockPlayerIndex = mockPlayers.findIndex(p => p.id === playerId);
-        if (mockPlayerIndex > -1) {
-            mockPlayers.splice(mockPlayerIndex, 1);
-        }
+        
+        let customPlayers = getCustomPlayers();
+        customPlayers = customPlayers.filter(p => p.id !== playerId);
+        saveCustomPlayers(customPlayers);
+
         return delay({ success: true });
     }
     return delay({ success: false });
