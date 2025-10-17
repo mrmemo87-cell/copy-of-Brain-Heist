@@ -1,6 +1,6 @@
 
 import { Profile, HackEmulationResult, HackResult, ShopItem, InventoryItem, UserTask, Question, FeedItem, ReactionEmoji } from '../types';
-import { mockCurrentUser, mockPlayers, mockShopItems, mockInventory, mockUserTasks, mockSubjects, mockQuestions, mockFeedItems } from './mockData';
+import { mockCurrentUser, mockPlayers, mockShopItems, mockInventory, mockUserTasks, mockSubjects, mockQuestions, mockFeedItems, mockAdminUser } from './mockData';
 
 // --- LOCAL STORAGE PERSISTENCE ---
 const CUSTOM_PLAYERS_KEY = 'brainheist_custom_players';
@@ -85,7 +85,7 @@ export const toggleMute = () => {
 
 
 const SIMULATED_DELAY = 500;
-let ALL_MOCK_PLAYERS = [mockCurrentUser, ...mockPlayers, ...getCustomPlayers()];
+let ALL_MOCK_PLAYERS = [mockCurrentUser, ...mockPlayers, mockAdminUser, ...getCustomPlayers()];
 
 // Helper to simulate network delay
 const delay = <T,>(data: T): Promise<T> => 
@@ -116,7 +116,10 @@ export const getPlayerById = async (userId: string): Promise<Profile | null> => 
 
 
 export const getPlayers = async (excludeId?: string): Promise<Profile[]> => {
-  const players = excludeId ? ALL_MOCK_PLAYERS.filter(p => p.id !== excludeId) : ALL_MOCK_PLAYERS;
+  let players = ALL_MOCK_PLAYERS.filter(p => p.role !== 'admin');
+  if (excludeId) {
+    players = players.filter(p => p.id !== excludeId)
+  }
   return delay(JSON.parse(JSON.stringify(players)));
 };
 
@@ -360,6 +363,7 @@ export const addPlayer = async(playerData: Omit<Profile, 'id' | 'avatar_url' | '
         avatar_url: `https://picsum.photos/seed/${Date.now()}/200`,
         last_online_at: new Date().toISOString(),
         badges: [],
+        role: 'player',
     };
     ALL_MOCK_PLAYERS.push(newPlayer);
     

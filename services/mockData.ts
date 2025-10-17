@@ -16,6 +16,7 @@ export const mockCurrentUser: Profile = {
   hacking_skill: 30,
   last_online_at: new Date().toISOString(),
   badges: ['10_wins_streak', 'alpha_tester'],
+  role: 'player',
 };
 
 export const mockPlayers: Profile[] = [
@@ -35,6 +36,7 @@ export const mockPlayers: Profile[] = [
     hacking_skill: 28,
     last_online_at: new Date(Date.now() - 1000 * 60 * 3).toISOString(), // 3 mins ago
     badges: ['top_10_player'],
+    role: 'player',
   },
   {
     id: 'user-003',
@@ -52,6 +54,7 @@ export const mockPlayers: Profile[] = [
     hacking_skill: 22,
     last_online_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(), // 15 mins ago
     badges: [],
+    role: 'player',
   },
   {
     id: 'user-004',
@@ -69,8 +72,28 @@ export const mockPlayers: Profile[] = [
     hacking_skill: 45,
     last_online_at: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
     badges: ['beta_tester', 'high_roller'],
+    role: 'player',
   },
 ];
+
+export const mockAdminUser: Profile = {
+  id: 'user-admin-sobbi',
+  username: 'Sobbi',
+  password: 'sobbi-brain',
+  display_name: 'Sobbi (Admin)',
+  avatar_url: 'https://picsum.photos/seed/admin-sobbi/200',
+  bio: 'System Administrator.',
+  creds: 999999,
+  xp: 999999,
+  level: 99,
+  stamina: 100,
+  stamina_max: 100,
+  security_level: 99,
+  hacking_skill: 99,
+  last_online_at: new Date().toISOString(),
+  badges: ['admin'],
+  role: 'admin',
+};
 
 
 export const mockShopItems: ShopItem[] = [

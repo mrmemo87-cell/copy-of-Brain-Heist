@@ -14,6 +14,7 @@ export interface Profile {
   hacking_skill: number;
   last_online_at: string;
   badges: string[];
+  role?: 'admin' | 'player';
 }
 
 export type ItemType = 'consumable' | 'equip' | 'cosmetic' | 'booster';
