@@ -38,8 +38,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onHack, isCurrentUser =
           <span className="font-bold text-lg text-lime-400">{player.level}</span>
         </div>
         <div className="flex flex-col">
-          <span className="text-gray-400">Coins</span>
-          <span className="font-bold text-lg text-yellow-400">{player.coins.toLocaleString()}</span>
+          {/* FIX: Use 'creds' instead of 'coins' to match the Profile type. */}
+          <span className="text-gray-400">Creds</span>
+          <span className="font-bold text-lg text-yellow-400">{player.creds.toLocaleString()}</span>
         </div>
         <div className="flex flex-col">
           <span className="text-gray-400">Hacking Skill</span>
@@ -50,10 +51,19 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onHack, isCurrentUser =
           <span className="font-bold text-lg text-cyan-400">{player.security_level}</span>
         </div>
       </div>
+       {player.badges && player.badges.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {player.badges.map(badge => (
+            <span key={badge} className="text-xs font-semibold bg-gray-700 text-cyan-300 px-2 py-1 rounded-full">
+              {badge.replace(/_/g, ' ').toUpperCase()}
+            </span>
+          ))}
+        </div>
+      )}
       {!isCurrentUser && (
         <button
           onClick={() => onHack(player)}
-          className="btn-neon w-full mt-4 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:shadow-pink-500/50"
+          className="btn-neon w-full bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg hover:shadow-pink-500/50"
         >
           HACK
         </button>
