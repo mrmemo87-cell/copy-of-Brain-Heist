@@ -494,6 +494,7 @@ const App: React.FC = () => {
   });
   const [allQuestions, setAllQuestions] = useState<Question[]>([]);
   const [editingQuestion, setEditingQuestion] = useState(getInitialEditingQuestion());
+  const [isGeneratingQuestion, setIsGeneratingQuestion] = useState(false);
 
 
   // App Initialization
@@ -808,6 +809,36 @@ const App: React.FC = () => {
         GameService.playSound('hack_fail');
     }
   };
+  
+    const handleGenerateQuestion = async () => {
+        setIsGeneratingQuestion(true);
+        GameService.playSound('ui_click');
+        try {
+            const result = await GameService.generateQuestionWithAI(
+                editingQuestion.subject,
+                editingQuestion.prompt // Use prompt field as an optional topic
+            );
+            if (result) {
+                setEditingQuestion(prev => ({
+                    ...prev,
+                    id: undefined, // Clear ID to ensure it's a new question
+                    prompt: result.prompt,
+                    choices: result.choices,
+                    correct_choice_index: result.correct_choice_index
+                }));
+                GameService.playSound('item_activate');
+            } else {
+                alert('AI failed to generate a valid question. Please try again.');
+                GameService.playSound('hack_fail');
+            }
+        } catch (error) {
+            console.error(error);
+            alert('An error occurred while generating the question.');
+            GameService.playSound('hack_fail');
+        } finally {
+            setIsGeneratingQuestion(false);
+        }
+    };
 
   const handleEditQuestion = (question: Question) => {
     // We don't have the index, so we find it. Assume first choice is correct for editing.
@@ -970,6 +1001,15 @@ const App: React.FC = () => {
                         <hr className="my-6 border-purple-500/30" />
                         
                         <h4 className="font-orbitron text-lg mb-4">Add/Edit Manually</h4>
+                        
+                        <div className="bg-gray-800/50 p-4 rounded-lg mb-4">
+                            <h5 className="font-bold text-md mb-2 neon-glow-purple">Generate with AI ✨</h5>
+                            <p className="text-xs text-gray-400 mb-2">Select a subject, optionally type a specific topic in the prompt field below, then click generate!</p>
+                             <button onClick={handleGenerateQuestion} disabled={isGeneratingQuestion} className="btn-neon w-full bg-purple-600 p-2 rounded disabled:opacity-50 disabled:cursor-wait">
+                                {isGeneratingQuestion ? 'Generating...' : 'Generate with AI'}
+                            </button>
+                        </div>
+
                         <form onSubmit={handleSaveQuestion} className="space-y-4">
                             <div>
                                 <label className="block text-sm font-bold mb-1">Subject</label>
@@ -978,8 +1018,8 @@ const App: React.FC = () => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-bold mb-1">Prompt</label>
-                                <textarea placeholder="Question Prompt" value={editingQuestion.prompt} onChange={e => setEditingQuestion({...editingQuestion, prompt: e.target.value})} className="bg-gray-800 p-2 rounded border border-purple-400/50 w-full" required />
+                                <label className="block text-sm font-bold mb-1">Prompt / AI Topic</label>
+                                <textarea placeholder="Question Prompt (or a topic for the AI)" value={editingQuestion.prompt} onChange={e => setEditingQuestion({...editingQuestion, prompt: e.target.value})} className="bg-gray-800 p-2 rounded border border-purple-400/50 w-full" required />
                             </div>
                             {editingQuestion.choices.map((choice, index) => (
                                 <div key={index}>

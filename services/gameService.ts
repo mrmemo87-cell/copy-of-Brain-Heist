@@ -4,6 +4,7 @@ import { db, seedDatabase } from './firebase';
 import { 
     collection, getDocs, getDoc, doc, addDoc, updateDoc, deleteDoc, query, where, runTransaction, orderBy, limit, writeBatch, documentId, collectionGroup
 } from 'firebase/firestore';
+import { GoogleGenAI, Type } from '@google/genai';
 
 
 // --- START OF SOUND SERVICE ---
@@ -614,6 +615,59 @@ export const uploadQuestionsFromCSV = async (csvContent: string): Promise<{succe
         return { success: false, count: 0 };
     }
 };
+
+export const generateQuestionWithAI = async (subject: string, topic?: string): Promise<(Omit<Question, 'id' | 'correct_answer' | 'subject'> & { correct_choice_index: number }) | null> => {
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const schema = {
+            type: Type.OBJECT,
+            properties: {
+                prompt: { type: Type.STRING, description: "The text of the quiz question." },
+                choices: {
+                    type: Type.ARRAY,
+                    description: "An array of exactly 4 strings representing the possible answers.",
+                    items: { type: Type.STRING }
+                },
+                correct_choice_index: {
+                    type: Type.INTEGER,
+                    description: "The index (0-3) in the 'choices' array that is the correct answer."
+                }
+            },
+            required: ['prompt', 'choices', 'correct_choice_index']
+        };
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Generate one multiple-choice quiz question. Subject: ${subject}. Topic: ${topic || 'any'}. Difficulty: High-school level. The question should be clever and require some thought. Provide exactly 4 choices.`,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: schema
+            }
+        });
+
+        const jsonText = response.text.trim();
+        const generatedQuestion = JSON.parse(jsonText);
+        
+        // Validate the response structure
+        if (
+            generatedQuestion &&
+            typeof generatedQuestion.prompt === 'string' &&
+            Array.isArray(generatedQuestion.choices) &&
+            generatedQuestion.choices.length === 4 &&
+            typeof generatedQuestion.correct_choice_index === 'number' &&
+            generatedQuestion.correct_choice_index >= 0 &&
+            generatedQuestion.correct_choice_index < 4
+        ) {
+            return generatedQuestion;
+        } else {
+            throw new Error("AI response did not match the required schema.");
+        }
+    } catch (e) {
+        console.error("AI question generation failed:", e);
+        return null;
+    }
+};
+
 
 // --- ADMIN FUNCTIONS ---
 export const addPlayer = async(playerData: Omit<Profile, 'id' | 'avatar_url' | 'last_online_at' | 'badges'>): Promise<Profile> => {

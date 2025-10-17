@@ -1,17 +1,17 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-// FIX: Import the 'doc' function from Firestore to create document references.
 import { getFirestore, collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { mockAdminUser, mockCurrentUser, mockFeedItems, mockInventory, mockPlayers, mockQuestions, mockShopItems, mockTaskTemplates, mockUserTasks } from "./mockData";
 
-// TODO: Add your own Firebase configuration from your Firebase console
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyAMUEP4tY4MI4RXjVK_UK_nl_YdQnvgHPg",
+  authDomain: "copy-of-brain-heist.firebaseapp.com",
+  projectId: "copy-of-brain-heist",
+  storageBucket: "copy-of-brain-heist.firebasestorage.app",
+  messagingSenderId: "79933339835",
+  appId: "1:79933339835:web:e085fee5330c4571da919e",
+  measurementId: "G-5GZGFVF8PG"
 };
 
 // Initialize Firebase
